@@ -1,0 +1,420 @@
+{
+    "services": {
+        "/pm_lights_controller/CoaxLight/SetState": {
+            "service_type": "pm_msgs/srv/CoaxLightSetState",
+            "request": {
+                "turn_on": false
+            },
+            "response": {}
+        },
+        "/pm_moveit_server/move_1k_dispenser_to_frame": {
+            "service_type": "pm_moveit_interfaces/srv/MoveToFrame",
+            "request": {
+                "endeffector_frame_override": "use_default_frame",
+                "target_frame": "",
+                "translation": {
+                    "x": 0.0,
+                    "y": 0.0,
+                    "z": 0.0
+                },
+                "rotation": {
+                    "x": 0.0,
+                    "y": 0.0,
+                    "z": 0.0,
+                    "w": 1.0
+                },
+                "execute_movement": false
+            },
+            "response": {
+                "success": false,
+                "joint_names": [],
+                "joint_values": [],
+                "message": ""
+            }
+        },
+        "/pm_moveit_server/move_cam1_relative": {
+            "service_type": "pm_moveit_interfaces/srv/MoveRelative",
+            "request": {
+                "translation": {
+                    "x": 0.0,
+                    "y": 0.0,
+                    "z": 0.0
+                },
+                "rotation": {
+                    "x": 0.0,
+                    "y": 0.0,
+                    "z": 0.0,
+                    "w": 1.0
+                },
+                "execute_movement": false
+            },
+            "response": {
+                "success": false,
+                "joint_names": [],
+                "joint_values": [],
+                "message": ""
+            }
+        },
+        "/pm_moveit_server/move_cam1_to_frame": {
+            "service_type": "pm_moveit_interfaces/srv/MoveToFrame",
+            "request": {
+                "endeffector_frame_override": "use_default_frame",
+                "target_frame": "",
+                "translation": {
+                    "x": 0.0,
+                    "y": 0.0,
+                    "z": 0.0
+                },
+                "rotation": {
+                    "x": 0.0,
+                    "y": 0.0,
+                    "z": 0.0,
+                    "w": 1.0
+                },
+                "execute_movement": false
+            },
+            "response": {
+                "success": false,
+                "joint_names": [],
+                "joint_values": [],
+                "message": ""
+            }
+        },
+        "/pm_moveit_server/move_cam1_to_pose": {
+            "service_type": "pm_moveit_interfaces/srv/MoveToPose",
+            "request": {
+                "endeffector_frame_override": "use_default_frame",
+                "move_to_pose": {
+                    "position": {
+                        "x": 0.0,
+                        "y": 0.0,
+                        "z": 0.0
+                    },
+                    "orientation": {
+                        "x": 0.0,
+                        "y": 0.0,
+                        "z": 0.0,
+                        "w": 1.0
+                    }
+                },
+                "execute_movement": false
+            },
+            "response": {
+                "success": false,
+                "joint_names": [],
+                "joint_values": [],
+                "message": ""
+            }
+        },
+        "/pm_moveit_server/move_laser_relative": {
+            "service_type": "pm_moveit_interfaces/srv/MoveRelative",
+            "request": {
+                "translation": {
+                    "x": 0.0,
+                    "y": 0.0,
+                    "z": 0.0
+                },
+                "rotation": {
+                    "x": 0.0,
+                    "y": 0.0,
+                    "z": 0.0,
+                    "w": 1.0
+                },
+                "execute_movement": false
+            },
+            "response": {
+                "success": false,
+                "joint_names": [],
+                "joint_values": [],
+                "message": ""
+            }
+        },
+        "/pm_moveit_server/move_laser_to_frame": {
+            "service_type": "pm_moveit_interfaces/srv/MoveToFrame",
+            "request": {
+                "endeffector_frame_override": "use_default_frame",
+                "target_frame": "",
+                "translation": {
+                    "x": 0.0,
+                    "y": 0.0,
+                    "z": 0.0
+                },
+                "rotation": {
+                    "x": 0.0,
+                    "y": 0.0,
+                    "z": 0.0,
+                    "w": 1.0
+                },
+                "execute_movement": false
+            },
+            "response": {
+                "success": false,
+                "joint_names": [],
+                "joint_values": [],
+                "message": ""
+            }
+        },
+        "/pm_moveit_server/move_laser_to_pose": {
+            "service_type": "pm_moveit_interfaces/srv/MoveToPose",
+            "request": {
+                "endeffector_frame_override": "use_default_frame",
+                "move_to_pose": {
+                    "position": {
+                        "x": 0.0,
+                        "y": 0.0,
+                        "z": 0.0
+                    },
+                    "orientation": {
+                        "x": 0.0,
+                        "y": 0.0,
+                        "z": 0.0,
+                        "w": 1.0
+                    }
+                },
+                "execute_movement": false
+            },
+            "response": {
+                "success": false,
+                "joint_names": [],
+                "joint_values": [],
+                "message": ""
+            }
+        },
+        "/pm_moveit_server/move_tool_relative": {
+            "service_type": "pm_moveit_interfaces/srv/MoveRelative",
+            "request": {
+                "translation": {
+                    "x": 0.0,
+                    "y": 0.0,
+                    "z": 0.0
+                },
+                "rotation": {
+                    "x": 0.0,
+                    "y": 0.0,
+                    "z": 0.0,
+                    "w": 1.0
+                },
+                "execute_movement": false
+            },
+            "response": {
+                "success": false,
+                "joint_names": [],
+                "joint_values": [],
+                "message": ""
+            }
+        },
+        "/pm_moveit_server/move_tool_to_frame": {
+            "service_type": "pm_moveit_interfaces/srv/MoveToFrame",
+            "request": {
+                "endeffector_frame_override": "use_default_frame",
+                "target_frame": "",
+                "translation": {
+                    "x": 0.0,
+                    "y": 0.0,
+                    "z": 0.0
+                },
+                "rotation": {
+                    "x": 0.0,
+                    "y": 0.0,
+                    "z": 0.0,
+                    "w": 1.0
+                },
+                "execute_movement": false
+            },
+            "response": {
+                "success": false,
+                "joint_names": [],
+                "joint_values": [],
+                "message": ""
+            }
+        },
+        "/pm_moveit_server/move_tool_to_pose": {
+            "service_type": "pm_moveit_interfaces/srv/MoveToPose",
+            "request": {
+                "endeffector_frame_override": "use_default_frame",
+                "move_to_pose": {
+                    "position": {
+                        "x": 0.0,
+                        "y": 0.0,
+                        "z": 0.0
+                    },
+                    "orientation": {
+                        "x": 0.0,
+                        "y": 0.0,
+                        "z": 0.0,
+                        "w": 1.0
+                    }
+                },
+                "execute_movement": false
+            },
+            "response": {
+                "success": false,
+                "joint_names": [],
+                "joint_values": [],
+                "message": ""
+            }
+        },
+        "/pm_pneumatic_controller/N1K_Dispenser_Joint/MoveBackward": {
+            "service_type": "pm_msgs/srv/EmptyWithSuccess",
+            "request": {},
+            "response": {
+                "success": false
+            }
+        },
+        "/pm_pneumatic_controller/N1K_Dispenser_Joint/MoveForward": {
+            "service_type": "pm_msgs/srv/EmptyWithSuccess",
+            "request": {},
+            "response": {
+                "success": false
+            }
+        },
+        "/pm_pneumatic_controller/N1K_Dispenser_Protection_Joint/MoveBackward": {
+            "service_type": "pm_msgs/srv/EmptyWithSuccess",
+            "request": {},
+            "response": {
+                "success": false
+            }
+        },
+        "/pm_pneumatic_controller/N1K_Dispenser_Protection_Joint/MoveForward": {
+            "service_type": "pm_msgs/srv/EmptyWithSuccess",
+            "request": {},
+            "response": {
+                "success": false
+            }
+        },
+        "/pm_robot_primitive_skills/dispense_1K": {
+            "service_type": "pm_msgs/srv/DispenseForTime",
+            "request": {
+                "time": 0.0
+            },
+            "response": {
+                "success": false
+            }
+        },
+        "/pm_robot_primitive_skills/move_uv_in_curing_position": {
+            "service_type": "example_interfaces/srv/SetBool",
+            "request": {
+                "data": false
+            },
+            "response": {
+                "success": false,
+                "message": ""
+            }
+        },
+        "/pm_robot_primitive_skills/uv_curing": {
+            "service_type": "pm_msgs/srv/UVCuringSkill",
+            "request": {
+                "intensity_percent": [
+                    0,
+                    0,
+                    0,
+                    0
+                ],
+                "duration": [
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0
+                ]
+            },
+            "response": {
+                "success": false,
+                "message": ""
+            }
+        },
+        "/pm_skills/correct_frame_with_laser": {
+            "service_type": "pm_skills_interfaces/srv/CorrectFrame",
+            "request": {
+                "frame_name": "",
+                "remeasure_after_correction": false
+            },
+            "response": {
+                "success": false,
+                "correction_values": {
+                    "x": 0.0,
+                    "y": 0.0,
+                    "z": 0.0
+                },
+                "message": ""
+            }
+        },
+        "/pm_skills/vision_correct_frame": {
+            "service_type": "pm_skills_interfaces/srv/CorrectFrame",
+            "request": {
+                "frame_name": "",
+                "remeasure_after_correction": false
+            },
+            "response": {
+                "success": false,
+                "correction_values": {
+                    "x": 0.0,
+                    "y": 0.0,
+                    "z": 0.0
+                },
+                "message": ""
+            }
+        },
+        "/pm_skills/vacuum_gripper": {
+            "service_type": "pm_skills_interfaces/srv/VacuumGripper",
+            "request": {
+                "activate_vacuum": false
+            },
+            "response": {
+                "success": false,
+                "message": ""
+            }
+        }
+    },
+    "components": {
+        "UFC-2":{
+            "vision_frames": [
+                "UFC-2_Vision_Point_1",
+                "UFC-2_Vision_Point_2",
+                "UFC-2_Vision_Point_3",
+                "UFC-2_Vision_Point_4"
+
+            ],
+            "laser_frames": [
+                "UFC-2_Laser_Mes_Frame_1",
+                "UFC-2_Laser_Mes_Frame_2",
+                "UFC-2_Laser_Mes_Frame_3",
+                "UFC-2_Laser_Mes_Frame_4"
+            ],
+            "assembly_frame": "assembly_frame_Description_Glas-1_UFC-2",
+            "gripping_frame": "UFC-2_Gripping_Point"
+        },
+        "Glas-1":{
+            "vision_frames": [
+                "Glas-1_Vision_Point_1",
+                "Glas-1_Vision_Point_2",
+                "Glas-1_Vision_Point_3",
+                "Glas-1_Vision_Point_4"
+            ],
+            "laser_frames": [
+                "Glas-1_Laser_Mes_Frame_1",
+                "Glas-1_Laser_Mes_Frame_2",
+                "Glas-1_Laser_Mes_Frame_3",
+                "Glas-1_Laser_Mes_Frame_4"
+            ],
+            "glue_frames": [
+                "Glas-1_Glue_Frame_1",
+                "Glas-1_Glue_Frame_2",
+                "Glas-1_Glue_Frame_3",
+                "Glas-1_Glue_Frame_4"
+            ],
+            "target_frame": "target_frame_Description_Glas-1_UFC-2"
+        }
+    },
+    "conditions": [
+        {
+          "service": "/pm_skills/vision_correct_frame",
+          "preconditions": ["cam1_at_target_frame"],
+          "postconditions": ["frame_corrected_by_vision"]
+        },
+        {
+          "service": "",
+          "preconditions": [],
+          "postconditions": []
+        }
+    ]
+}

@@ -1,0 +1,150 @@
+{
+    "/pm_moveit_server/list_parameters": {
+        "service_type": "rcl_interfaces/srv/ListParameters",
+        "request": {
+            "prefixes": [],
+            "depth": 0
+        },
+        "response": {
+            "result": {
+                "names": [],
+                "prefixes": []
+            }
+        }
+    },
+    "/pm_moveit_server/move_cam1_relative": {
+        "service_type": "pm_moveit_interfaces/srv/MoveCam1TcpRelative",
+        "request": {
+            "translation": {
+                "x": 0.0,
+                "y": 0.0,
+                "z": 0.0
+            },
+            "rotation": {
+                "x": 0.0,
+                "y": 0.0,
+                "z": 0.0,
+                "w": 1.0
+            },
+            "exec_wait_for_user_input": false,
+            "execute": false
+        },
+        "response": {
+            "success": false,
+            "return_msg": "",
+            "joint_names": [],
+            "joint_values": []
+        }
+    },
+    "/pm_moveit_server/move_cam1_to_frame": {
+        "service_type": "pm_moveit_interfaces/srv/MoveCam1TcpTo",
+        "request": {
+            "frame_name": "",
+            "move_to_pose": {
+                "position": {
+                    "x": 0.0,
+                    "y": 0.0,
+                    "z": 0.0
+                },
+                "orientation": {
+                    "x": 0.0,
+                    "y": 0.0,
+                    "z": 0.0,
+                    "w": 1.0
+                }
+            },
+            "translation": {
+                "x": 0.0,
+                "y": 0.0,
+                "z": 0.0
+            },
+            "rotation": {
+                "x": 0.0,
+                "y": 0.0,
+                "z": 0.0,
+                "w": 1.0
+            },
+            "exec_wait_for_user_input": false,
+            "execute": false
+        },
+        "response": {
+            "success": false,
+            "joint_names": [],
+            "joint_values": []
+        }
+    },
+    "/pm_moveit_server/move_laser_to_frame": {
+        "service_type": "pm_moveit_interfaces/srv/MoveLaserTcpTo",
+        "request": {
+            "frame_name": "",
+            "move_to_pose": {
+                "position": {
+                    "x": 0.0,
+                    "y": 0.0,
+                    "z": 0.0
+                },
+                "orientation": {
+                    "x": 0.0,
+                    "y": 0.0,
+                    "z": 0.0,
+                    "w": 1.0
+                }
+            },
+            "translation": {
+                "x": 0.0,
+                "y": 0.0,
+                "z": 0.0
+            },
+            "rotation": {
+                "x": 0.0,
+                "y": 0.0,
+                "z": 0.0,
+                "w": 1.0
+            },
+            "exec_wait_for_user_input": false,
+            "execute": false
+        },
+        "response": {
+            "success": false,
+            "joint_names": [],
+            "joint_values": []
+        }
+    },
+    "/pm_moveit_server/move_tool_to_frame": {
+        "service_type": "pm_moveit_interfaces/srv/MoveToolTcpTo",
+        "request": {
+            "frame_name": "",
+            "move_to_pose": {
+                "position": {
+                    "x": 0.0,
+                    "y": 0.0,
+                    "z": 0.0
+                },
+                "orientation": {
+                    "x": 0.0,
+                    "y": 0.0,
+                    "z": 0.0,
+                    "w": 1.0
+                }
+            },
+            "translation": {
+                "x": 0.0,
+                "y": 0.0,
+                "z": 0.0
+            },
+            "rotation": {
+                "x": 0.0,
+                "y": 0.0,
+                "z": 0.0,
+                "w": 1.0
+            },
+            "exec_wait_for_user_input": false,
+            "execute": false
+        },
+        "response": {
+            "success": false,
+            "joint_names": [],
+            "joint_values": []
+        }
+    }
+}

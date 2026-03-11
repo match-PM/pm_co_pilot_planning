@@ -1,0 +1,23 @@
+{
+  "conditions": [
+    {
+      "name": "N1K_Dispenser_Protection_Joint/MoveBackward",
+      "preconditions": [],
+      "postconditions": [{ "joint": "N1K_Dispenser_Protection_Joint", "state": "opened" }]
+    },
+    {
+      "name": "N1K_Dispenser_Joint/MoveForward",
+      "preconditions": [{ "joint": "N1K_Dispenser_Protection_Joint", "state": "opened" }],
+      "postconditions": [{ "joint": "N1K_Dispenser_Joint", "state": "forward" }]
+    },
+    {
+      "name": "pm_skills/dispense_adhesive",
+      "preconditions": [
+        { "joint": "N1K_Dispenser_Protection_Joint", "state": "opened" },
+        { "joint": "N1K_Dispenser_Joint", "state": "forward" }
+      ]
+    }
+  ]
+}
+
+  

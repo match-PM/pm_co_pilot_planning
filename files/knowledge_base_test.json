@@ -1,0 +1,114 @@
+{
+  "conditions": [
+    {
+      "service": "/pm_moveit_server/move_cam1_to_frame",
+      "preconditions": [],
+      "postconditions": ["cam1_at_target_frame"]
+    },
+    {
+      "service": "/pm_lights_controller/CoaxLight/SetState",
+      "preconditions": ["cam1_at_target_frame"],
+      "postconditions": ["coax_lighting_ready"]
+    },
+    {
+      "service": "/pm_skills/vision_correct_frame",
+      "preconditions": ["cam1_at_target_frame", "coax_lighting_ready"],
+      "postconditions": ["frame_corrected"]
+    },
+    {
+      "service": "/pm_moveit_server/move_laser_to_frame",
+      "preconditions": [],
+      "postconditions": ["laser_positioned"]
+    },
+    {
+      "service": "/pm_skills/correct_frame_with_laser",
+      "preconditions": ["laser_positioned"],
+      "postconditions": ["frame_corrected"]
+    },
+    {
+      "service": "/pm_moveit_server/move_1k_dispenser_to_frame",
+      "preconditions": ["frame_corrected"],
+      "postconditions": ["1k_dispenser_positioned"]
+    },
+    {
+      "service": "/pm_pneumatic_controller/N1K_Dispenser_Protection_Joint/MoveForward",
+      "preconditions": ["1k_dispenser_positioned"],
+      "postconditions": ["protection_forward"]
+    },
+    {
+      "service": "/pm_pneumatic_controller/N1K_Dispenser_Joint/MoveForward",
+      "preconditions": ["1k_dispenser_positioned"],
+      "postconditions": ["dispenser_forward"]
+    },
+    {
+      "service": "/pm_robot_primitive_skills/dispense_1K",
+      "preconditions": ["dispenser_forward"],
+      "postconditions": ["adhesive_dispensed"]
+    },
+    {
+      "service": "/pm_pneumatic_controller/N1K_Dispenser_Joint/MoveBackward",
+      "preconditions": ["adhesive_dispensed"],
+      "postconditions": ["dispenser_retracted"]
+    },
+    {
+      "service": "/pm_pneumatic_controller/N1K_Dispenser_Protection_Joint/MoveBackward",
+      "preconditions": ["protection_forward"],
+      "postconditions": ["protection_retracted"]
+    },
+    {
+      "service": "/pm_moveit_server/move_tool_to_frame",
+      "preconditions": ["frame_corrected"],
+      "postconditions": ["tool_at_target_frame"]
+    },
+    {
+      "service": "/pm_skills/vacuum_gripper",
+      "preconditions": ["tool_at_target_frame"],
+      "postconditions": ["vacuum_state_set"]
+    },
+    {
+      "service": "/pm_moveit_server/move_tool_relative",
+      "preconditions": ["vacuum_state_set"],
+      "postconditions": ["part_gripped"]
+    },
+    {
+      "service": "/pm_moveit_server/move_tool_to_pose",
+      "preconditions": ["part_gripped"],
+      "postconditions": ["tool_at_target_pose"]
+    },
+    {
+      "service": "/pm_moveit_server/move_cam1_relative",
+      "preconditions": ["cam1_at_target_frame"],
+      "postconditions": ["cam1_offset_applied"]
+    },
+    {
+      "service": "/pm_moveit_server/move_laser_relative",
+      "preconditions": ["laser_positioned"],
+      "postconditions": ["laser_offset_applied"]
+    },
+    {
+      "service": "/pm_skills/dispense_adhesive",
+      "preconditions": ["frame_corrected"],
+      "postconditions": ["adhesive_dispensed"]
+    },
+    {
+      "service": "/pm_robot_primitive_skills/move_uv_in_curing_position",
+      "preconditions": ["adhesive_dispensed"],
+      "postconditions": ["uv_positioned"]
+    },
+    {
+      "service": "/pm_robot_primitive_skills/uv_curing",
+      "preconditions": ["uv_positioned"],
+      "postconditions": ["adhesive_cured"]
+    },
+    {
+      "service": "/pm_moveit_server/move_laser_to_pose",
+      "preconditions": [],
+      "postconditions": ["laser_positioned"]
+    },
+    {
+      "service": "/pm_moveit_server/move_cam1_to_pose",
+      "preconditions": [],
+      "postconditions": ["cam1_at_target_pose"]
+    }
+  ]
+}

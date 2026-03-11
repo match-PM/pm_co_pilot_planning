@@ -1,0 +1,274 @@
+ros2 topic echo /tf
+transforms:
+- header:
+    stamp:
+      sec: 697
+      nanosec: 928000000
+    frame_id: Z_Axis
+  child_frame_id: 1K_Dispenser
+  transform:
+    translation:
+      x: -0.104
+      y: -0.0262
+      z: -0.35449999999800347
+    rotation:
+      x: 0.0
+      y: 0.0
+      z: 0.0
+      w: 1.0
+- header:
+    stamp:
+      sec: 697
+      nanosec: 928000000
+    frame_id: Z_Axis
+  child_frame_id: 1K_Dispenser_Protection
+  transform:
+    translation:
+      x: -0.03149999996127503
+      y: -0.02479
+      z: -0.424
+    rotation:
+      x: 0.0
+      y: 0.0
+      z: 0.0
+      w: 1.0
+- header:
+    stamp:
+      sec: 697
+      nanosec: 928000000
+    frame_id: Z_Axis
+  child_frame_id: 2K_Dispenser_Cartridge
+  transform:
+    translation:
+      x: -0.169
+      y: 0.01176
+      z: -0.4239999999970782
+    rotation:
+      x: 0.0
+      y: 0.0
+      z: 0.0
+      w: 1.0
+- header:
+    stamp:
+      sec: 697
+      nanosec: 928000000
+    frame_id: Camera_Station
+  child_frame_id: Calibration_Qube
+  transform:
+    translation:
+      x: 0.154
+      y: 0.108
+      z: 0.30499999962268737
+    rotation:
+      x: 0.0
+      y: 0.0
+      z: 0.0
+      w: 1.0
+- header:
+    stamp:
+      sec: 697
+      nanosec: 928000000
+    frame_id: Camera_Station
+  child_frame_id: Camera_Calibration_Platelet
+  transform:
+    translation:
+      x: 0.08
+      y: -0.08050000040958366
+      z: 0.293
+    rotation:
+      x: 0.0
+      y: 0.0
+      z: 0.0
+      w: 1.0
+- header:
+    stamp:
+      sec: 697
+      nanosec: 928000000
+    frame_id: Gonio_Left_Base
+  child_frame_id: Gonio_Left_Stage_1_Top
+  transform:
+    translation:
+      x: 0.188500000000042
+      y: 0.110000000000054
+      z: 0.212499999999997
+    rotation:
+      x: -1.1756529083584155e-09
+      y: 0.0
+      z: 0.0
+      w: 1.0
+- header:
+    stamp:
+      sec: 697
+      nanosec: 928000000
+    frame_id: Gonio_Left_Stage_1_Top
+  child_frame_id: Gonio_Left_Stage_2_Bottom
+  transform:
+    translation:
+      x: 0.0
+      y: 0.0
+      z: 0.0
+    rotation:
+      x: 0.0
+      y: -2.498592444055703e-10
+      z: 0.0
+      w: 1.0
+- header:
+    stamp:
+      sec: 697
+      nanosec: 928000000
+    frame_id: Gonio_Right_Stage_1_Bottom
+  child_frame_id: Gonio_Right_Stage_1_Top
+  transform:
+    translation:
+      x: 0.0324999999999993
+      y: 0.0326774999999999
+      z: 0.11
+    rotation:
+      x: 0.0
+      y: 2.4238553386624062e-09
+      z: 0.0
+      w: 1.0
+- header:
+    stamp:
+      sec: 697
+      nanosec: 928000000
+    frame_id: Gonio_Right_Stage_1_Top
+  child_frame_id: Gonio_Right_Stage_2_Bottom
+  transform:
+    translation:
+      x: 0.0
+      y: 0.0
+      z: 0.0
+    rotation:
+      x: -1.0023968322059318e-09
+      y: 0.0
+      z: 0.0
+      w: 1.0
+- header:
+    stamp:
+      sec: 697
+      nanosec: 928000000
+    frame_id: Z_Axis
+  child_frame_id: Gripper_Rot_Plate
+  transform:
+    translation:
+      x: 0.0600000000000017
+      y: -0.0580000000000003
+      z: -0.427500000000004
+    rotation:
+      x: 0.0
+      y: 0.0
+      z: 6.053466243826817e-07
+      w: 0.9999999999998168
+- header:
+    stamp:
+      sec: 697
+      nanosec: 928000000
+    frame_id: UV_Slider_X_Back
+  child_frame_id: UV_LED_Back
+  transform:
+    translation:
+      x: 0.0649999999999949
+      y: 0.05399999087404508
+      z: 0.0496999999948266
+    rotation:
+      x: 0.0
+      y: 0.0
+      z: 0.0
+      w: 1.0
+- header:
+    stamp:
+      sec: 697
+      nanosec: 928000000
+    frame_id: UV_Slider_X_Front
+  child_frame_id: UV_LED_Front
+  transform:
+    translation:
+      x: 0.0649999999999999
+      y: -0.054000021611953344
+      z: 0.0496999999988213
+    rotation:
+      x: 0.0
+      y: 0.0
+      z: 0.0
+      w: 1.0
+- header:
+    stamp:
+      sec: 697
+      nanosec: 928000000
+    frame_id: Gonio_Left_Base
+  child_frame_id: UV_Slider_X_Back
+  transform:
+    translation:
+      x: 0.12410000589225337
+      y: 0.200000000000049
+      z: 0.234999999999998
+    rotation:
+      x: 0.0
+      y: 0.0
+      z: 0.0
+      w: 1.0
+- header:
+    stamp:
+      sec: 697
+      nanosec: 928000000
+    frame_id: Gonio_Left_Base
+  child_frame_id: UV_Slider_X_Front
+  transform:
+    translation:
+      x: 0.12410000282444854
+      y: 0.0200000000000492
+      z: 0.234999999999997
+    rotation:
+      x: 0.0
+      y: 0.0
+      z: 0.0
+      w: 1.0
+- header:
+    stamp:
+      sec: 697
+      nanosec: 928000000
+    frame_id: axis_base
+  child_frame_id: X_Axis
+  transform:
+    translation:
+      x: 0.6469899999624616
+      y: 0.11775
+      z: 0.47499
+    rotation:
+      x: 0.0
+      y: 0.0
+      z: 0.0
+      w: 1.0
+- header:
+    stamp:
+      sec: 697
+      nanosec: 928000000
+    frame_id: X_Axis
+  child_frame_id: Y_Axis
+  transform:
+    translation:
+      x: 0.10865
+      y: 0.2583500000078551
+      z: 0.06525
+    rotation:
+      x: 0.0
+      y: 0.0
+      z: 0.0
+      w: 1.0
+- header:
+    stamp:
+      sec: 697
+      nanosec: 928000000
+    frame_id: Y_Axis
+  child_frame_id: Z_Axis
+  transform:
+    translation:
+      x: -0.00365
+      y: -0.499
+      z: 0.28505000000439945
+    rotation:
+      x: 0.0
+      y: 0.0
+      z: 0.0
+      w: 1.0
