@@ -47,6 +47,23 @@ class EmptyInput(BaseModel):
     pass
 
 
+class GetAvailableServicesInput(BaseModel):
+    category: str = Field(
+        default="",
+        description="Optional category filter: motion, scene_management, alignment, sensing, dispensing, manipulation, curing. Empty string returns all."
+    )
+
+
+class ResolveServiceCallInput(BaseModel):
+    service_key: str = Field(
+        description="The service key from the registry, e.g. 'spawn_component', 'vision_correct_frame'"
+    )
+    parameter_overrides: str = Field(
+        default="{}",
+        description='JSON string of parameter overrides, e.g. \'{"frame_name": "UFC_Paper_Vision_Point_1"}\''
+    )
+
+
 # ---------------------------------------------------------------------------
 # Helper functions
 # ---------------------------------------------------------------------------
@@ -216,7 +233,7 @@ class AssemblyKnowledgeTools:
                 "  - spawning_origin: determines gonio side (left/right)\n\n"
                 "Input: absolute file path OR just the component name (e.g. 'UFC_Paper').\n"
                 "CRITICAL: When a component is spawned, all its frame names are prefixed with "
-                "the component name: {ComponentName}_{FrameName}. "
+                "the component name: {{ComponentName}}_{{FrameName}}. "
                 "Example: 'UFC_Paper' + 'Vision_Point_1' → 'UFC_Paper_Vision_Point_1'."
             ),
             args_schema=GetComponentDescriptionInput,
@@ -255,16 +272,28 @@ class AssemblyKnowledgeTools:
             args_schema=EmptyInput,
         )
 
-        self.get_service_registry_tool = StructuredTool.from_function(
-            func=self._get_service_registry,
-            name="get_service_registry",
+        self.get_service_catalog_tool = StructuredTool.from_function(
+            func=self._get_available_services,
+            name="get_service_catalog",
             description=(
-                "Return the full service registry: a mapping of high-level assembly intents "
-                "(e.g. ALIGN_GONIO_RIGHT, VISION_CORRECT, DISPENSE_AT_FRAMES) to their "
-                "corresponding ROS2 service clients and default parameters. "
-                "Use this to understand what services are available for each assembly workflow phase."
+                "Get the static service catalog: descriptions, parameters, and usage guidance "
+                "for all ROS2 assembly services. Use this to understand what services exist "
+                "before building a sequence. "
+                "Optionally filter by category: motion, scene_management, alignment, "
+                "sensing, dispensing, manipulation, curing."
             ),
-            args_schema=EmptyInput,
+            args_schema=GetAvailableServicesInput,
+        )
+
+        self.resolve_service_call_tool = StructuredTool.from_function(
+            func=self._resolve_service_call,
+            name="resolve_service_call",
+            description=(
+                "Resolve a service registry key into a complete service call specification "
+                "with merged default + override parameters. Use this when building a sequence "
+                "to get the correct client, type, and parameters for an action."
+            ),
+            args_schema=ResolveServiceCallInput,
         )
 
     # ------------------------------------------------------------------
@@ -489,13 +518,45 @@ class AssemblyKnowledgeTools:
         except Exception as e:
             return json.dumps({"success": False, "error": str(e)})
 
-    def _get_service_registry(self) -> str:
+    def _get_available_services(self, category: str = "") -> str:
+        """Get available services, optionally filtered by category."""
         try:
             from pm_co_pilot_planning.submodules.langchain.tools.ServiceRegistry import ServiceRegistry
             registry = ServiceRegistry()
-            return json.dumps({
-                "success": True,
-                "intents": registry.get_summary(),
-            })
+            if category:
+                services = registry.get_services_by_category(category)
+                if not services:
+                    categories = registry.get_categories()
+                    return f"No services found for category '{category}'. Available categories: {categories}"
+                # Format subset
+                lines = [f"Services in category '{category}':"]
+                for key, svc in services.items():
+                    lines.append(f"\n  {key}:")
+                    lines.append(f"    client: {svc['client']}")
+                    lines.append(f"    description: {svc.get('description', '').strip()}")
+                    params = svc.get('parameters', {})
+                    required = [p for p, info in params.items() if info.get('required')]
+                    if required:
+                        lines.append(f"    required_params: {required}")
+                return "\n".join(lines)
+            else:
+                return registry.get_service_summary()
         except Exception as e:
-            return json.dumps({"success": False, "error": str(e)})
+            return f"Error getting available services: {e}"
+
+    def _resolve_service_call(self, service_key: str, parameter_overrides: str = "{}") -> str:
+        """Resolve a service key with parameter overrides into a ready-to-use call spec."""
+        try:
+            import json
+            overrides = json.loads(parameter_overrides) if parameter_overrides else {}
+            from pm_co_pilot_planning.submodules.langchain.tools.ServiceRegistry import ServiceRegistry
+            registry = ServiceRegistry()
+            result = registry.resolve_service_call(service_key, overrides)
+            if result is None:
+                all_keys = list(registry.get_all_services().keys())
+                return f"Service '{service_key}' not found. Available: {all_keys}"
+            return json.dumps(result, indent=2)
+        except json.JSONDecodeError as e:
+            return f"Invalid JSON in parameter_overrides: {e}"
+        except Exception as e:
+            return f"Error resolving service call: {e}"

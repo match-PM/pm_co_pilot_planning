@@ -63,7 +63,8 @@ class Agent:
             assembly_knowledge.list_available_assemblies_tool,
             assembly_knowledge.get_assembly_description_tool,
             assembly_knowledge.list_available_rsap_sequences_tool,
-            assembly_knowledge.get_service_registry_tool,
+            assembly_knowledge.get_service_catalog_tool,
+            assembly_knowledge.resolve_service_call_tool,
 
             # ── Efficient query tools ─────────────────────────────────────────────
             tools_instance.get_action_at_index_tool,        # For "what's at index X?"

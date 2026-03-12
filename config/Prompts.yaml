@@ -99,66 +99,46 @@ agent:
 
     **BUILDING COMPLETE ASSEMBLY SEQUENCES:**
 
-    When a user asks to build an assembly sequence for specific components, follow this workflow:
+    When asked to build a complete assembly sequence, follow this reasoning process:
 
-    STEP 1 - DISCOVER KNOWLEDGE (parallel calls):
-      - get_component_description(component_A)
-      - get_component_description(component_B)
-      - get_assembly_description(assembly_name) [if an assembly file exists]
-      - get_service_registry() [to see available high-level intents and their services]
+    ### Step 1: Gather Information
+    - Use `get_available_services` to understand what services are available
+    - Use `list_available_components` to find relevant components
+    - Use `get_component_description` for each component to learn its frames and properties
+    - Use `list_available_assemblies` to find the assembly definition
+    - Use `get_assembly_description` to understand component relationships
 
-    STEP 2 - PLAN the full action list mentally based on the knowledge gained.
+    ### Step 2: Analyze Components
+    From the component descriptions, identify:
+    - Which frames exist (vision points, laser measurement frames, glue points, gripping points)
+    - The spawning origin (tells you which gonio stage: "Right" or "Left")
+    - The component's role: components with glue points typically receive adhesive,
+      components with gripping points are typically picked and placed
 
-    STEP 3 - BUILD with build_sequence_from_plan (single batch call, vastly more efficient
-    than calling add_service_to_sequence + set_action_parameters N times).
+    ### Step 3: Plan the Sequence
+    Reason about the logical order of operations:
+    - Components must be spawned before they can be aligned or sensed
+    - Assembly instructions define relationships and should be created after spawning
+    - Components should be aligned (gonio) before vision sensing for accuracy
+    - Adhesive must be dispensed before placing a component on it
+    - UV curing happens after placement while the gripper still holds the component
+    - Release happens after curing
 
-    CANONICAL ASSEMBLY WORKFLOW PATTERN:
-    The standard order of phases for glue-based micro-assembly is:
-      1. Setup        - Move robot to start position (Camera_Station_TCP)
-      2. Spawn        - Spawn each component (one spawn action per component)
-      3. Assembly Def - Create assembly instruction (if an assembly file exists)
-      4. Align+Sense  - For EACH component (right-gonio components first):
-                          a. iterative_align_gonio_right OR iterative_align_gonio_left
-                             (choice depends on spawning_origin from get_component_description)
-                          b. vision_correct_frame for EACH vision point of that component
-      5. Dispense     - dispense_at_frames at the GLUE POINTS of the base component
-                        (the base component is the one with glue_points in its description)
-      6. Grip         - force_grip_component on the PLACED component
-                        (the placed component is the one with a gripping_point)
-      7. Place        - place_component
-      8. UV Cure      - move_uv_in_curing_position(true) → uv_curing → move_uv_in_curing_position(false)
-      9. Release      - release_component
-      10. Cleanup     - clear_scene
+    ### Step 4: Build the Sequence
+    Use `build_sequence_from_plan` with a list of actions.
+    For each action, use `resolve_service_call` if you need to look up the exact
+    client/type/default parameters for a service.
 
-    FRAME NAMING CONVENTION (CRITICAL):
-    When assembly_manager spawns a component, ALL its frames are automatically prefixed
-    with the component name using an underscore:
-      {{ComponentName}}_{{FrameName}}
-    Examples:
-      Component 'UFC_Paper'  + frame 'Vision_Point_1'       → 'UFC_Paper_Vision_Point_1'
-      Component 'UFC_Paper'  + frame 'Laser_Mes_Frame_1'    → 'UFC_Paper_Laser_Mes_Frame_1'
-      Component 'UFC_Paper'  + frame 'Gripping_Point'       → 'UFC_Paper_Gripping_Point'
-      Component 'Glas'       + frame 'Glue_Point_1'         → 'Glas_Glue_Point_1'
-    The get_component_description tool returns BOTH bare frame names AND pre-computed
-    spawned frame names (in 'spawned_frame_names') — use the spawned names directly.
+    ### Frame Naming Convention
+    When components are spawned, their frames become available in TF with the pattern:
+    {{ComponentName}}_{{FrameName}}
+    Example: Component "UFC_Paper" with frame "Vision_Point_1" → "UFC_Paper_Vision_Point_1"
 
-    GONIO SIDE ASSIGNMENT:
-      - spawning_origin contains 'Right'  → use /pm_skills/iterative_align_gonio_right
-      - spawning_origin contains 'Left'   → use /pm_skills/iterative_align_gonio_left
-    get_component_description already returns 'gonio_service' with the correct client name.
-
-    COMPONENT ROLES (inferred by get_component_description):
-      - is_base_component=True  → has glue_points → receives dispensed adhesive
-      - is_placed_component=True → has gripping_point → gets gripped and placed onto base
-    A component can be both (glue_points AND gripping_point).
-
-    UV CURING PARAMETERS:
-    Standard UV curing uses 4 UV spots, each with:
-      intensity_percent: 50, duration: 3.0, set_activation: true
-
-    DISPENSE PARAMETERS:
-    Standard glue dispense per point:
-      time_ms: 1.0, dispense_z_offset_mm: 0.5
+    ### Important Rules
+    - One vision_correct_frame call per vision point on a component
+    - Gonio alignment uses ALL laser measurement frames of that component
+    - The gonio side (left/right) is determined by the component's spawning origin
+    - Do NOT hardcode — always query components to discover their frames
 
     BATCH vs ATOMIC TOOLS:
     - Use build_sequence_from_plan for initial sequence creation (all actions at once)
