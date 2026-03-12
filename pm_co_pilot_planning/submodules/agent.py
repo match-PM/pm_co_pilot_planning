@@ -23,6 +23,7 @@ from langgraph.graph import START, MessagesState, StateGraph
 from collections import defaultdict
 
 from pm_co_pilot_planning.submodules.langchain.tools.Tools import Tools
+from pm_co_pilot_planning.submodules.langchain.tools.AssemblyKnowledgeTools import AssemblyKnowledgeTools
 from pm_co_pilot_planning.submodules.langchain.LLMConfig import LLMConfig
 
 
@@ -42,6 +43,8 @@ class Agent:
         else:
             tools_instance = Tools(service_node)
             self.rsap_instance = None
+
+        assembly_knowledge = AssemblyKnowledgeTools(service_node)
         
         # Initialize interaction log
         self.interaction_log = []
@@ -54,37 +57,47 @@ class Agent:
         
         # Comprehensive list of tools for RSAP control - ordered by efficiency
         self.tools = [
-            # Efficient query tools (use these first for simple queries!)
+            # ── Assembly knowledge (use first when planning a new sequence) ──────
+            assembly_knowledge.list_available_components_tool,
+            assembly_knowledge.get_component_description_tool,
+            assembly_knowledge.list_available_assemblies_tool,
+            assembly_knowledge.get_assembly_description_tool,
+            assembly_knowledge.list_available_rsap_sequences_tool,
+            assembly_knowledge.get_service_registry_tool,
+
+            # ── Efficient query tools ─────────────────────────────────────────────
             tools_instance.get_action_at_index_tool,        # For "what's at index X?"
             tools_instance.get_sequence_summary_tool,       # For "show me the sequence"
             tools_instance.get_action_parameters_tool,      # For "what are the current parameters?"
-            
-            # Service/Action discovery
+
+            # ── Service/Action discovery ──────────────────────────────────────────
             tools_instance.get_available_services_tool,
-            # tools_instance.get_available_ros_actions_tool,
             tools_instance.get_service_parameters_tool,
             tools_instance.get_parameter_value_recommendations_tool,
-            
-            # Building sequence
+
+            # ── Batch sequence building (preferred for new complete sequences) ────
+            tools_instance.build_sequence_from_plan_tool,
+            tools_instance.load_and_modify_sequence_tool,
+
+            # ── Atomic sequence building (for additions / edits) ──────────────────
             tools_instance.add_service_to_sequence_tool,
-            # tools_instance.add_ros_action_to_sequence_tool,
             tools_instance.add_user_interaction_tool,
-            
-            # Modifying sequence
+
+            # ── Modifying sequence ────────────────────────────────────────────────
             tools_instance.set_action_parameters_tool,
             tools_instance.delete_action_tool,
             tools_instance.move_action_tool,
-            
-            # Execution
+
+            # ── Execution ─────────────────────────────────────────────────────────
             tools_instance.execute_sequence_tool,
             tools_instance.execute_single_action_tool,
-            
-            # Sequence persistence
+
+            # ── Sequence persistence ──────────────────────────────────────────────
             tools_instance.save_sequence_tool,
             tools_instance.load_sequence_tool,
             tools_instance.clear_sequence_tool,
-            
-            # Heavy tool (use sparingly - only when full details needed!)
+
+            # ── Heavy (use sparingly) ─────────────────────────────────────────────
             tools_instance.get_action_list_tool,
         ]
         

@@ -4,6 +4,7 @@ clients_by_name:
  - '/assembly_manager/'
  - '/pm_vision_manager/'
  - '/pm_skills'
+ - '/pm_robot_primitive_skills/'
 
 clients_by_type:
   # - 'rcl_interfaces/srv/GetParameters'

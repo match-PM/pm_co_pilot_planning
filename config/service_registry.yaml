@@ -1,0 +1,144 @@
+# Service Registry: maps high-level assembly intents to ROS2 service configurations.
+#
+# Design principle: Each intent currently maps to one high-level service call.
+# In the future, an intent can be decomposed into multiple lower-level service calls
+# by extending the 'services' list — no code changes required, only config changes.
+#
+# Intent naming convention: VERB_NOUN in SCREAMING_SNAKE_CASE
+
+intents:
+
+  MOVE_TO_START:
+    description: "Move the robot's laser head to the camera station start position"
+    services:
+      - client: "/pm_moveit_server/move_laser_to_frame"
+        type: "pm_moveit_interfaces/srv/MoveToFrame"
+        default_parameters:
+          endeffector_frame_override: "use_default_frame"
+          target_frame: "Camera_Station_TCP"
+          translation: {x: 0.0, y: 0.0, z: 0.05}
+          rotation: {x: 0.0, y: 0.0, z: 0.0, w: 1.0}
+          execute_movement: true
+
+  SPAWN_COMPONENT:
+    description: "Spawn a component from its description file into the assembly scene"
+    services:
+      - client: "/assembly_manager/spawn_component_from_description"
+        type: "assembly_manager_interfaces/srv/SpawnComponentFromDescription"
+        default_parameters:
+          file_path: ""   # must be overridden with component .json path
+          component_name_override: ""
+          uuid_override: ""
+
+  CREATE_ASSEMBLY:
+    description: "Create an assembly instruction from a description file"
+    services:
+      - client: "/assembly_manager/create_assembly_instruction_from_description"
+        type: "assembly_manager_interfaces/srv/CreateAssemblyInstructionFromDescription"
+        default_parameters:
+          file_path: ""   # must be overridden with assembly .json path
+          spawn_components: false
+
+  ALIGN_GONIO_RIGHT:
+    description: "Iteratively align a component on the right gonio stage using laser measurement"
+    services:
+      - client: "/pm_skills/iterative_align_gonio_right"
+        type: "pm_skills_interfaces/srv/IterativeGonioAlign"
+        default_parameters:
+          confocal_laser: false
+          target_alignment_frame: "PM_Robot_Tool_TCP"
+          gonio_endeffector_frame: ""   # must be overridden: {ComponentName}_Gripping_Point
+          num_iterations: 1
+          frames_to_measure: []         # must be overridden: [{ComponentName}_Laser_Mes_Frame_1..4]
+
+  ALIGN_GONIO_LEFT:
+    description: "Iteratively align a component on the left gonio stage using laser measurement"
+    services:
+      - client: "/pm_skills/iterative_align_gonio_left"
+        type: "pm_skills_interfaces/srv/IterativeGonioAlign"
+        default_parameters:
+          confocal_laser: false
+          target_alignment_frame: "PM_Robot_Tool_TCP"
+          gonio_endeffector_frame: ""   # must be overridden: {ComponentName}_Gripping_Point
+          num_iterations: 1
+          frames_to_measure: []         # must be overridden: [{ComponentName}_Laser_Mes_Frame_1..4]
+
+  VISION_CORRECT:
+    description: "Correct a single frame using vision sensing"
+    services:
+      - client: "/pm_skills/vision_correct_frame"
+        type: "pm_skills_interfaces/srv/CorrectFrame"
+        default_parameters:
+          frame_name: ""              # must be overridden: {ComponentName}_Vision_Point_N
+          remeasure_after_correction: false
+          use_iterative_sensing: false
+
+  DISPENSE_AT_FRAMES:
+    description: "Dispense adhesive (glue) at specified frames"
+    services:
+      - client: "/pm_robot_primitive_skills/dispense_at_frames"
+        type: "pm_msgs/srv/DispenseAtPoints"
+        default_parameters:
+          dispense_points: []           # must be overridden: [{frame_name, time_ms, dispense_z_offset_mm}]
+
+  GRIP_COMPONENT:
+    description: "Force-grip a component and optionally align orientation"
+    services:
+      - client: "/pm_skills/force_grip_component"
+        type: "pm_skills_interfaces/srv/GripComponent"
+        default_parameters:
+          component_name: ""          # must be overridden
+          align_orientation: true
+
+  PLACE_COMPONENT:
+    description: "Place the currently gripped component at its assembly target position"
+    services:
+      - client: "/pm_skills/place_component"
+        type: "pm_skills_interfaces/srv/PlaceComponent"
+        default_parameters:
+          align_orientation: false
+          x_offset_um: 0.0
+          y_offset_um: 0.0
+          z_offset_um: 0.0
+          rx_offset_deg: 0.0
+          ry_offset_deg: 0.0
+          rz_offset_deg: 0.0
+
+  UV_CURE_FORWARD:
+    description: "Move the UV curing unit into its curing position"
+    services:
+      - client: "/pm_robot_primitive_skills/move_uv_in_curing_position"
+        type: "example_interfaces/srv/SetBool"
+        default_parameters:
+          data: true
+
+  UV_CURE_EXPOSE:
+    description: "Activate UV LED spots for curing the adhesive"
+    services:
+      - client: "/pm_robot_primitive_skills/uv_curing"
+        type: "pm_msgs/srv/UVCuringSkill"
+        default_parameters:
+          uv_curing_spot_properties: []   # must be overridden: [{intensity_percent, duration, set_activation}]
+
+  UV_CURE_BACKWARD:
+    description: "Retract the UV curing unit from its curing position"
+    services:
+      - client: "/pm_robot_primitive_skills/move_uv_in_curing_position"
+        type: "example_interfaces/srv/SetBool"
+        default_parameters:
+          data: false
+
+  RELEASE_COMPONENT:
+    description: "Release the currently gripped component"
+    services:
+      - client: "/pm_skills/release_component"
+        type: "pm_msgs/srv/EmptyWithSuccess"
+        default_parameters: {}
+
+  CLEAR_SCENE:
+    description: "Clear all components and assemblies from the scene"
+    services:
+      - client: "/assembly_manager/clear_scene"
+        type: "assembly_manager_interfaces/srv/ClearScene"
+        default_parameters:
+          save_data: false

@@ -95,7 +95,77 @@ agent:
     Tell the user what you tried and why at each step.
     
     **PERSISTENCE:** save_sequence(filepath), load_sequence(filepath), clear_sequence()
-    
+
+
+    **BUILDING COMPLETE ASSEMBLY SEQUENCES:**
+
+    When a user asks to build an assembly sequence for specific components, follow this workflow:
+
+    STEP 1 - DISCOVER KNOWLEDGE (parallel calls):
+      - get_component_description(component_A)
+      - get_component_description(component_B)
+      - get_assembly_description(assembly_name) [if an assembly file exists]
+      - get_service_registry() [to see available high-level intents and their services]
+
+    STEP 2 - PLAN the full action list mentally based on the knowledge gained.
+
+    STEP 3 - BUILD with build_sequence_from_plan (single batch call, vastly more efficient
+    than calling add_service_to_sequence + set_action_parameters N times).
+
+    CANONICAL ASSEMBLY WORKFLOW PATTERN:
+    The standard order of phases for glue-based micro-assembly is:
+      1. Setup        - Move robot to start position (Camera_Station_TCP)
+      2. Spawn        - Spawn each component (one spawn action per component)
+      3. Assembly Def - Create assembly instruction (if an assembly file exists)
+      4. Align+Sense  - For EACH component (right-gonio components first):
+                          a. iterative_align_gonio_right OR iterative_align_gonio_left
+                             (choice depends on spawning_origin from get_component_description)
+                          b. vision_correct_frame for EACH vision point of that component
+      5. Dispense     - dispense_at_frames at the GLUE POINTS of the base component
+                        (the base component is the one with glue_points in its description)
+      6. Grip         - force_grip_component on the PLACED component
+                        (the placed component is the one with a gripping_point)
+      7. Place        - place_component
+      8. UV Cure      - move_uv_in_curing_position(true) → uv_curing → move_uv_in_curing_position(false)
+      9. Release      - release_component
+      10. Cleanup     - clear_scene
+
+    FRAME NAMING CONVENTION (CRITICAL):
+    When assembly_manager spawns a component, ALL its frames are automatically prefixed
+    with the component name using an underscore:
+      {{ComponentName}}_{{FrameName}}
+    Examples:
+      Component 'UFC_Paper'  + frame 'Vision_Point_1'       → 'UFC_Paper_Vision_Point_1'
+      Component 'UFC_Paper'  + frame 'Laser_Mes_Frame_1'    → 'UFC_Paper_Laser_Mes_Frame_1'
+      Component 'UFC_Paper'  + frame 'Gripping_Point'       → 'UFC_Paper_Gripping_Point'
+      Component 'Glas'       + frame 'Glue_Point_1'         → 'Glas_Glue_Point_1'
+    The get_component_description tool returns BOTH bare frame names AND pre-computed
+    spawned frame names (in 'spawned_frame_names') — use the spawned names directly.
+
+    GONIO SIDE ASSIGNMENT:
+      - spawning_origin contains 'Right'  → use /pm_skills/iterative_align_gonio_right
+      - spawning_origin contains 'Left'   → use /pm_skills/iterative_align_gonio_left
+    get_component_description already returns 'gonio_service' with the correct client name.
+
+    COMPONENT ROLES (inferred by get_component_description):
+      - is_base_component=True  → has glue_points → receives dispensed adhesive
+      - is_placed_component=True → has gripping_point → gets gripped and placed onto base
+    A component can be both (glue_points AND gripping_point).
+
+    UV CURING PARAMETERS:
+    Standard UV curing uses 4 UV spots, each with:
+      intensity_percent: 50, duration: 3.0, set_activation: true
+
+    DISPENSE PARAMETERS:
+    Standard glue dispense per point:
+      time_ms: 1.0, dispense_z_offset_mm: 0.5
+
+    BATCH vs ATOMIC TOOLS:
+    - Use build_sequence_from_plan for initial sequence creation (all actions at once)
+    - Use load_and_modify_sequence to start from an existing sequence template
+    - Use add_service_to_sequence / set_action_parameters for single edits to an existing sequence
+
+
     Be concise in your responses.
 
 

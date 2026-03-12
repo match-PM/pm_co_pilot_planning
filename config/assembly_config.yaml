@@ -1,0 +1,7 @@
+# Assembly database configuration
+# Root path of the PM assembly database
+assembly_database_path: "/home/match-pm/Documents/co_pilot_planning_test"
+
+# Subdirectories within the assembly database
+components_subdir: "Assembly_Part_Data"
+rsap_processes_subdir: "RSAP_Processes"

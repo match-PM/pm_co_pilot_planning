@@ -59,6 +59,40 @@ class GetParameterValueRecommendationsInput(BaseModel):
     parameter_type: Optional[str] = Field(default=None, description="Optional parameter type filter (e.g., 'string', 'str', 'uint32'). If omitted, returns all value sets.")
 
 
+class ActionSpec(BaseModel):
+    """Single action specification used inside BuildSequenceFromPlanInput."""
+    service_client: str = Field(description="ROS2 service client name (e.g. '/pm_skills/vision_correct_frame')")
+    name: str = Field(description="Display name shown in the RSAP UI (e.g. 'Correct UFC Vision 1')")
+    parameters: Dict[str, Any] = Field(
+        default_factory=dict,
+        description="Parameter key-value pairs to set on the action. Nested dicts for nested ROS messages."
+    )
+    service_type: Optional[str] = Field(default=None, description="Optional ROS2 service type string")
+
+
+class BuildSequenceFromPlanInput(BaseModel):
+    """Input schema for build_sequence_from_plan tool."""
+    actions: List[ActionSpec] = Field(
+        description="Ordered list of actions to add to the sequence. "
+                    "They are appended in order starting at start_index."
+    )
+    clear_existing: bool = Field(
+        default=False,
+        description="If True, clear the existing sequence before building. Default False."
+    )
+    start_index: Optional[int] = Field(
+        default=None,
+        description="1-based index where insertion starts. If None, actions are appended to the end."
+    )
+
+
+class LoadAndModifySequenceInput(BaseModel):
+    """Input schema for load_and_modify_sequence tool."""
+    file_path: str = Field(
+        description="Absolute path to a .rsap.json sequence file to load into the current RSAP instance."
+    )
+
+
 class Tools:
     """
     The Tools class provides a set of tools that can be used by the agent.
@@ -263,6 +297,38 @@ class Tools:
             Input should be a JSON string with key: 'index' (required).
             Example: {"index": 27}
             Returns current parameter values as a dictionary."""
+        )
+
+        self.build_sequence_from_plan_tool = StructuredTool.from_function(
+            func=self._build_sequence_from_plan,
+            name="build_sequence_from_plan",
+            description=(
+                "[BATCH BUILDER] Add multiple actions to the sequence in a single call. "
+                "PREFER this over calling add_service_to_sequence + set_action_parameters "
+                "repeatedly when building a new sequence from scratch.\n\n"
+                "Provide an ordered list of ActionSpec objects, each with:\n"
+                "  - service_client (required): ROS2 service client name\n"
+                "  - name (required): display name for the action\n"
+                "  - parameters (optional): dict of parameter values to set\n"
+                "  - service_type (optional): service type string\n\n"
+                "Set clear_existing=True to wipe the current sequence first.\n"
+                "Returns a per-action result report (success/failure for each action)."
+            ),
+            args_schema=BuildSequenceFromPlanInput,
+        )
+
+        self.load_and_modify_sequence_tool = StructuredTool.from_function(
+            func=self._load_and_modify_sequence,
+            name="load_and_modify_sequence",
+            description=(
+                "Load an existing .rsap.json sequence file into the RSAP instance. "
+                "This replaces the current sequence with the loaded one. "
+                "After loading, use the standard atomic tools (set_action_parameters, "
+                "delete_action, move_action, add_service_to_sequence) to adapt it. "
+                "Input: absolute file path to a .rsap.json file. "
+                "Use list_available_rsap_sequences to discover available files."
+            ),
+            args_schema=LoadAndModifySequenceInput,
         )
 
     def _get_available_services(self, input_str: str = "") -> str:
@@ -1240,5 +1306,118 @@ class Tools:
         """Legacy wrapper for backward compatibility."""
         return self._get_sequence_summary_structured()
 
+    def _build_sequence_from_plan(
+        self,
+        actions: List[ActionSpec],
+        clear_existing: bool = False,
+        start_index: Optional[int] = None,
+    ) -> str:
+        """
+        Batch-create multiple sequence actions in one call.
+
+        Each ActionSpec is added with add_service + set_parameters in a single
+        locked operation so parallel callers cannot interleave.
+        """
+        try:
+            if clear_existing:
+                self.rsap.action_list.clear()
+                if hasattr(self.rsap, 'set_current_action_index'):
+                    self.rsap.set_current_action_index(0)
+                elif hasattr(self.rsap, 'current_action_index'):
+                    self.rsap.current_action_index = 0
+
+            results = []
+            errors = []
+
+            for i, action_spec in enumerate(actions):
+                with self._sequence_lock:
+                    try:
+                        # Determine insertion index
+                        if start_index is not None:
+                            insert_idx_0 = (start_index - 1) + i  # 0-based
+                        else:
+                            insert_idx_0 = len(self.rsap.action_list)  # append
+
+                        # Clamp to valid range
+                        insert_idx_0 = max(0, min(insert_idx_0, len(self.rsap.action_list)))
+
+                        success = self.rsap.append_service_to_action_list_at_index(
+                            service_client=action_spec.service_client,
+                            index=insert_idx_0,
+                            service_type=action_spec.service_type,
+                            service_name=action_spec.name,
+                        )
+
+                        if not success:
+                            errors.append({
+                                "action_index": i + 1,
+                                "name": action_spec.name,
+                                "error": "append_service_to_action_list_at_index returned False",
+                            })
+                            results.append({"action_index": i + 1, "name": action_spec.name, "success": False})
+                            continue
+
+                        # Set parameters if provided
+                        if action_spec.parameters:
+                            try:
+                                rsap_action = self.rsap.get_action_at_index(insert_idx_0)
+                                current_params = dict(rsap_action.get_request_as_ordered_dict())
+                                merged = self._deep_merge(current_params, action_spec.parameters)
+                                merged_copy = copy.deepcopy(merged)
+                                set_message_fields(rsap_action.request, merged_copy)
+                            except Exception as param_error:
+                                errors.append({
+                                    "action_index": i + 1,
+                                    "name": action_spec.name,
+                                    "error": f"Parameter setting failed: {param_error}",
+                                })
+                                results.append({
+                                    "action_index": i + 1,
+                                    "name": action_spec.name,
+                                    "success": False,
+                                    "note": "Action added but parameters could not be set",
+                                })
+                                continue
+
+                        results.append({
+                            "action_index": i + 1,
+                            "name": action_spec.name,
+                            "inserted_at": insert_idx_0 + 1,  # 1-based for display
+                            "success": True,
+                        })
+
+                    except Exception as e:
+                        errors.append({"action_index": i + 1, "name": action_spec.name, "error": str(e)})
+                        results.append({"action_index": i + 1, "name": action_spec.name, "success": False})
+
+            successful = sum(1 for r in results if r.get("success"))
+            return json.dumps({
+                "success": successful == len(actions),
+                "total_actions": len(actions),
+                "successful": successful,
+                "failed": len(actions) - successful,
+                "sequence_length_after": len(self.rsap.action_list),
+                "results": results,
+                "errors": errors if errors else None,
+            })
+
+        except Exception as e:
+            return json.dumps({"success": False, "error": str(e)})
+
+    def _load_and_modify_sequence(self, file_path: str) -> str:
+        """Load an RSAP sequence from a .rsap.json file."""
+        try:
+            if not file_path:
+                return json.dumps({"success": False, "error": "file_path is required"})
+
+            self.rsap.rsap_file_manager.load_from_JSON(file_path)
+            count = len(self.rsap.action_list)
+            return json.dumps({
+                "success": True,
+                "message": f"Loaded sequence with {count} actions from '{file_path}'",
+                "action_count": count,
+            })
+        except Exception as e:
+            return json.dumps({"success": False, "error": str(e)})
 
 

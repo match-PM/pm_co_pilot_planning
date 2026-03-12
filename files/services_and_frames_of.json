@@ -374,17 +374,5 @@
                 "message": ""
             }
         }
-    },
-    "conditions": [
-        {
-          "service": "/pm_skills/vision_correct_frame",
-          "preconditions": ["cam1_at_target_frame"],
-          "postconditions": ["frame_corrected_by_vision"]
-        },
-        {
-          "service": "",
-          "preconditions": [],
-          "postconditions": []
-        }
-    ]
+    }
 }

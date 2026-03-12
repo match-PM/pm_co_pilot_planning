@@ -84,7 +84,6 @@ clients_by_name:
   - '/pm_skills/set_parameters'
   - '/pm_skills/list_parameters'
   - '/pm_skills/grip_component'
-  - '/pm_skills/place_component'
   - '/pm_skills/get_parameters'
   - '/pm_skills/get_parameter_types'
   - '/pm_skills/describe_parameters'
@@ -101,8 +100,6 @@ clients_by_name:
   - '/pm_vision_skills/vision_measure_frame'
   - '/pm_skills/confocal_laser'
   - '/pm_lights_controller/CoaxLight/GetState'
-  - '/pm_robot_primitive_skills/dispense_at_frames'
-    
 
 # Be careful with this. All service clients with this service type will be hidden in the blacklist
 clients_by_type:
