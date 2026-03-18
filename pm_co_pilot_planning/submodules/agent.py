@@ -62,9 +62,12 @@ class Agent:
             assembly_knowledge.get_component_description_tool,
             assembly_knowledge.list_available_assemblies_tool,
             assembly_knowledge.get_assembly_description_tool,
-            assembly_knowledge.list_available_rsap_sequences_tool,
-            assembly_knowledge.get_service_catalog_tool,
-            assembly_knowledge.resolve_service_call_tool,
+
+            # ── Live scene knowledge ──────────────────────────────────────────────
+            assembly_knowledge.list_objects_in_scene_tool,
+            assembly_knowledge.get_object_properties_tool,
+            assembly_knowledge.get_object_frames_tool,
+            assembly_knowledge.get_frame_properties_tool,
 
             # ── Efficient query tools ─────────────────────────────────────────────
             tools_instance.get_action_at_index_tool,        # For "what's at index X?"

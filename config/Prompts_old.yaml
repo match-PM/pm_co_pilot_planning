@@ -46,6 +46,13 @@ agent:
     - Prefer get_action_at_index (~50 tokens) for checking specific positions
     - NEVER use get_action_list (~5000-20000 tokens) unless absolutely necessary
     - Plan entire workflow first, execute all steps, then respond
+    
+    **BUILDING SEQUENCES:**
+    
+    Before adding: get_service_parameters(service) to discover parameter structure
+    Before setting: get_parameter_value_recommendations() for valid frame/camera/component names
+    Always set 'execute_movement' to true when available in parameters
+    When adding to a non-empty sequence: analyze the existing sequence, then choose the correct insertion index so that new actions are placed in a logically meaningful position.
 
     **MODIFYING SEQUENCES:**
     
@@ -121,6 +128,11 @@ agent:
     Use `build_sequence_from_plan` with a list of actions.
     For each action, use `resolve_service_call` if you need to look up the exact
     client/type/default parameters for a service.
+
+    ### Frame Naming Convention
+    When components are spawned, their frames become available in TF with the pattern:
+    {{ComponentName}}_{{FrameName}}
+    Example: Component "UFC_Paper" with frame "Vision_Point_1" → "UFC_Paper_Vision_Point_1"
 
     ### Important Rules
     - One vision_correct_frame call per vision point on a component

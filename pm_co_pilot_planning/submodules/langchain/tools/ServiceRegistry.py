@@ -66,40 +66,40 @@ class ServiceRegistry:
         package_path = get_package_share_directory("pm_co_pilot_planning")
         registry_path = package_path + "/service_registry.yaml"
 
-        with open(registry_path, "r") as f:
-            data = yaml.safe_load(f)
+    #     with open(registry_path, "r") as f:
+    #         data = yaml.safe_load(f)
 
-        self._intents: Dict[str, IntentConfig] = {}
-        for intent_name, intent_data in data.get("intents", {}).items():
-            services = [
-                ServiceDefinition(
-                    client=svc["client"],
-                    type=svc.get("type", ""),
-                    default_parameters=svc.get("default_parameters", {}) or {},
-                )
-                for svc in intent_data.get("services", [])
-            ]
-            self._intents[intent_name] = IntentConfig(
-                name=intent_name,
-                description=intent_data.get("description", ""),
-                services=services,
-            )
+    #     self._intents: Dict[str, IntentConfig] = {}
+    #     for intent_name, intent_data in data.get("intents", {}).items():
+    #         services = [
+    #             ServiceDefinition(
+    #                 client=svc["client"],
+    #                 type=svc.get("type", ""),
+    #                 default_parameters=svc.get("default_parameters", {}) or {},
+    #             )
+    #             for svc in intent_data.get("services", [])
+    #         ]
+    #         self._intents[intent_name] = IntentConfig(
+    #             name=intent_name,
+    #             description=intent_data.get("description", ""),
+    #             services=services,
+    #         )
 
-    def get_intent(self, intent_name: str) -> Optional[IntentConfig]:
-        """Return IntentConfig for the given intent name, or None if not found."""
-        return self._intents.get(intent_name)
+    # def get_intent(self, intent_name: str) -> Optional[IntentConfig]:
+    #     """Return IntentConfig for the given intent name, or None if not found."""
+    #     return self._intents.get(intent_name)
 
-    def get_all_intent_names(self) -> List[str]:
-        """Return list of all registered intent names."""
-        return list(self._intents.keys())
+    # def get_all_intent_names(self) -> List[str]:
+    #     """Return list of all registered intent names."""
+    #     return list(self._intents.keys())
 
-    def get_summary(self) -> List[Dict[str, Any]]:
-        """Return a lightweight summary of all intents for the agent."""
-        return [
-            {
-                "intent": intent.name,
-                "description": intent.description,
-                "services": [svc.client for svc in intent.services],
-            }
-            for intent in self._intents.values()
-        ]
+    # def get_summary(self) -> List[Dict[str, Any]]:
+    #     """Return a lightweight summary of all intents for the agent."""
+    #     return [
+    #         {
+    #             "intent": intent.name,
+    #             "description": intent.description,
+    #             "services": [svc.client for svc in intent.services],
+    #         }
+    #         for intent in self._intents.values()
+    #     ]

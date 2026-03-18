@@ -1,12 +1,11 @@
 """
 AssemblyKnowledgeTools: LangChain tools that give the agent knowledge about
-the assembly database (components, assemblies, existing RSAP sequences).
+the assembly database (components, assemblies).
 
 These tools allow the agent to:
   - Discover available components and understand their frame structure
     (vision points, laser measurement frames, glue points, gripping point)
   - Discover available assemblies and their component relationships
-  - Discover existing RSAP sequences that can be loaded as starting points
 
 Frame naming convention (enforced by assembly_manager when spawning):
   {ComponentName}_{FrameName}
@@ -23,6 +22,10 @@ from langchain_core.tools import Tool, StructuredTool
 from pydantic import BaseModel, Field
 from rclpy.node import Node
 from ament_index_python.packages import get_package_share_directory
+import assembly_manager_interfaces.msg as am_msgs
+import rclpy
+from rosidl_runtime_py.convert import message_to_ordereddict
+from rosidl_runtime_py.set_message import set_message_fields
 
 
 # ---------------------------------------------------------------------------
@@ -54,13 +57,21 @@ class GetAvailableServicesInput(BaseModel):
     )
 
 
-class ResolveServiceCallInput(BaseModel):
-    service_key: str = Field(
-        description="The service key from the registry, e.g. 'spawn_component', 'vision_correct_frame'"
+class GetObjectPropertiesInput(BaseModel):
+    obj_name: str = Field(
+        description="Name of the object in the scene, e.g. 'UFC_Paper'."
     )
-    parameter_overrides: str = Field(
-        default="{}",
-        description='JSON string of parameter overrides, e.g. \'{"frame_name": "UFC_Paper_Vision_Point_1"}\''
+
+
+class GetObjectFramesInput(BaseModel):
+    obj_name: str = Field(
+        description="Name of the object in the scene, e.g. 'UFC_Paper'."
+    )
+
+
+class GetFramePropertiesInput(BaseModel):
+    frame_name: str = Field(
+        description="Full frame name as it appears in the scene, e.g. 'UFC_Paper_Vision_Point_1'."
     )
 
 
@@ -188,6 +199,17 @@ class AssemblyKnowledgeTools:
 
     def __init__(self, service_node: Node):
         self.service_node = service_node
+        self.service_node.get_logger().info("Initializing AssemblyKnowledgeTools...")
+        self._current_scene: Optional[am_msgs.ObjectScene] = None
+
+        # Subscribe to the live assembly scene
+        self._scene_sub = self.service_node.create_subscription(
+            am_msgs.ObjectScene,
+            "/assembly_manager/scene",
+            self._scene_callback,
+            10,
+        )
+        self.service_node.get_logger().info("Subscribed to /assembly_manager/scene for live scene updates.")
 
         try:
             cfg = _load_assembly_config()
@@ -261,40 +283,70 @@ class AssemblyKnowledgeTools:
             args_schema=GetAssemblyDescriptionInput,
         )
 
-        self.list_available_rsap_sequences_tool = StructuredTool.from_function(
-            func=self._list_available_rsap_sequences,
-            name="list_available_rsap_sequences",
+        self.list_objects_in_scene_tool = StructuredTool.from_function(
+            func=self._list_objects_in_scene,
+            name="list_objects_in_scene",
             description=(
-                "Scan the RSAP processes directory and return all existing .rsap.json sequence files. "
-                "Use this to discover sequences that can be loaded as starting points "
-                "or as reference implementations."
+                "Return all objects currently present in the live assembly scene. "
+                "Each entry contains the object name, its parent frame"
+                "Use this to see what has already been spawned before planning actions."
             ),
             args_schema=EmptyInput,
         )
 
-        self.get_service_catalog_tool = StructuredTool.from_function(
-            func=self._get_available_services,
-            name="get_service_catalog",
+        self.get_object_properties_tool = StructuredTool.from_function(
+            func=self._get_object_properties,
+            name="get_object_properties",
             description=(
-                "Get the static service catalog: descriptions, parameters, and usage guidance "
-                "for all ROS2 assembly services. Use this to understand what services exist "
-                "before building a sequence. "
-                "Optionally filter by category: motion, scene_management, alignment, "
-                "sensing, dispensing, manipulation, curing."
+                "Return the properties of a specific object in the live scene. "
+                "Input: the object name as it appears in the scene (e.g. 'UFC_Paper')."
             ),
-            args_schema=GetAvailableServicesInput,
+            args_schema=GetObjectPropertiesInput,
         )
 
-        self.resolve_service_call_tool = StructuredTool.from_function(
-            func=self._resolve_service_call,
-            name="resolve_service_call",
+        self.get_object_frames_tool = StructuredTool.from_function(
+            func=self._get_object_frames,
+            name="get_object_frames",
             description=(
-                "Resolve a service registry key into a complete service call specification "
-                "with merged default + override parameters. Use this when building a sequence "
-                "to get the correct client, type, and parameters for an action."
+                "Return all reference frames that belong to a specific object in the live scene. "
+                "Each frame entry includes the frame name, parent frame, pose (position + orientation), "
+                "and a summary of its properties (vision, laser, glue, gripping, assembly). "
+                "Input: the object name as it appears in the scene (e.g. 'UFC_Paper')."
             ),
-            args_schema=ResolveServiceCallInput,
+            args_schema=GetObjectFramesInput,
         )
+
+        self.get_frame_properties_tool = StructuredTool.from_function(
+            func=self._get_frame_properties,
+            name="get_frame_properties",
+            description=(
+                "Return the full properties of a specific frame in the live scene, identified by its "
+                "exact frame name (e.g. 'UFC_Paper_Vision_Point_1'). "
+                "Properties include vision, laser, glue, gripping, and assembly frame flags and values. "
+                "Searches across all objects in the scene."
+            ),
+            args_schema=GetFramePropertiesInput,
+        )
+
+    # ------------------------------------------------------------------
+    # Scene subscriber callback
+    # ------------------------------------------------------------------
+
+    def _scene_callback(self, msg: am_msgs.ObjectScene) -> None:
+        """Store the latest scene message received from /assembly_manager/scene."""
+        self._current_scene = msg
+
+    def _ensure_scene_updated(self, timeout_sec: float = 0.5) -> None:
+        """
+        Spin the node once for a short duration to process pending subscription messages.
+        This ensures the scene callback has a chance to be called if a message is available.
+        """
+        try:
+            rclpy.spin_once(self.service_node, timeout_sec=timeout_sec)
+        except Exception as e:
+            self.service_node.get_logger().warning(
+                f"AssemblyKnowledgeTools: could not spin node: {e}"
+            )
 
     # ------------------------------------------------------------------
     # Internal implementations
@@ -478,85 +530,229 @@ class AssemblyKnowledgeTools:
         except Exception as e:
             return json.dumps({"success": False, "error": str(e)})
 
-    def _list_available_rsap_sequences(self) -> str:
+    # ------------------------------------------------------------------
+    # Live scene tools
+    # ------------------------------------------------------------------
+
+    def _list_objects_in_scene(self) -> str:
+        """Return all objects currently in the live assembly scene."""
         try:
-            if not self._rsap_root or not os.path.isdir(self._rsap_root):
+            self._ensure_scene_updated()
+            if self._current_scene is None:
                 return json.dumps({
                     "success": False,
-                    "error": f"RSAP processes directory not found: '{self._rsap_root}'",
+                    "error": "No scene received yet. The /assembly_manager/scene topic may not be publishing.",
                 })
 
-            results = []
-            for dirpath, _dirnames, filenames in os.walk(self._rsap_root):
-                for filename in filenames:
-                    if not filename.endswith(".rsap.json"):
-                        continue
-                    full_path = os.path.join(dirpath, filename)
-                    try:
-                        with open(full_path, "r") as f:
-                            data = json.load(f)
-                        results.append({
-                            "name": data.get("name", filename.replace(".rsap.json", "")),
-                            "file_path": full_path,
-                            "action_count": len(data.get("action_list", [])),
-                            "saved_at": data.get("saved_at", ""),
-                        })
-                    except Exception:
-                        results.append({
-                            "name": filename.replace(".rsap.json", ""),
-                            "file_path": full_path,
-                            "action_count": None,
-                            "saved_at": "",
-                        })
+            objects = []
+            for obj in self._current_scene.objects_in_scene:
+                objects.append({
+                    "obj_name": obj.obj_name,
+                    "parent_frame": obj.parent_frame
+                })
 
             return json.dumps({
                 "success": True,
-                "count": len(results),
-                "sequences": sorted(results, key=lambda x: x["name"]),
+                "count": len(objects),
+                "objects": objects,
+            })
+
+        except Exception as e:
+            return json.dumps({"success": False, "error": str(e)})
+        
+    def _get_object_properties(self, obj_name: str) -> str:
+        """Return properties of a named object in the live scene."""
+        try:
+            self._ensure_scene_updated()
+            if self._current_scene is None:
+                return json.dumps({
+                    "success": False,
+                    "error": "No scene received yet. The /assembly_manager/scene topic may not be publishing.",
+                })
+
+            for obj in self._current_scene.objects_in_scene:
+                if obj.obj_name == obj_name:
+                    return json.dumps({
+                        "success": True,
+                        "obj_name": obj.obj_name,
+                        "parent_frame": obj.parent_frame,
+                        "properties": {
+                            "is_gripped": obj.properties.is_gripped,
+                            "is_assembled": obj.properties.is_assembled,
+                        },
+                    })
+
+            available = [o.obj_name for o in self._current_scene.objects_in_scene]
+            return json.dumps({
+                "success": False,
+                "error": f"Object '{obj_name}' not found in scene. Available: {available}",
             })
 
         except Exception as e:
             return json.dumps({"success": False, "error": str(e)})
 
-    def _get_available_services(self, category: str = "") -> str:
-        """Get available services, optionally filtered by category."""
+    def _get_object_frames(self, obj_name: str) -> str:
+        """Return all reference frames for a named object in the live scene."""
         try:
-            from pm_co_pilot_planning.submodules.langchain.tools.ServiceRegistry import ServiceRegistry
-            registry = ServiceRegistry()
-            if category:
-                services = registry.get_services_by_category(category)
-                if not services:
-                    categories = registry.get_categories()
-                    return f"No services found for category '{category}'. Available categories: {categories}"
-                # Format subset
-                lines = [f"Services in category '{category}':"]
-                for key, svc in services.items():
-                    lines.append(f"\n  {key}:")
-                    lines.append(f"    client: {svc['client']}")
-                    lines.append(f"    description: {svc.get('description', '').strip()}")
-                    params = svc.get('parameters', {})
-                    required = [p for p, info in params.items() if info.get('required')]
-                    if required:
-                        lines.append(f"    required_params: {required}")
-                return "\n".join(lines)
-            else:
-                return registry.get_service_summary()
-        except Exception as e:
-            return f"Error getting available services: {e}"
+            self._ensure_scene_updated()
+            if self._current_scene is None:
+                return json.dumps({
+                    "success": False,
+                    "error": "No scene received yet. The /assembly_manager/scene topic may not be publishing.",
+                })
 
-    def _resolve_service_call(self, service_key: str, parameter_overrides: str = "{}") -> str:
-        """Resolve a service key with parameter overrides into a ready-to-use call spec."""
-        try:
-            import json
-            overrides = json.loads(parameter_overrides) if parameter_overrides else {}
-            from pm_co_pilot_planning.submodules.langchain.tools.ServiceRegistry import ServiceRegistry
-            registry = ServiceRegistry()
-            result = registry.resolve_service_call(service_key, overrides)
-            if result is None:
-                all_keys = list(registry.get_all_services().keys())
-                return f"Service '{service_key}' not found. Available: {all_keys}"
-            return json.dumps(result, indent=2)
-        except json.JSONDecodeError as e:
-            return f"Invalid JSON in parameter_overrides: {e}"
+            target_obj = None
+            for obj in self._current_scene.objects_in_scene:
+                if obj.obj_name == obj_name:
+                    target_obj = obj
+                    break
+
+            if target_obj is None:
+                available = [o.obj_name for o in self._current_scene.objects_in_scene]
+                return json.dumps({
+                    "success": False,
+                    "error": f"Object '{obj_name}' not found in scene. Available: {available}",
+                })
+
+            frames = []
+            for fr in target_obj.ref_frames:
+                p = fr.properties
+                frames.append({
+                    "frame_name": fr.frame_name,
+                    "parent_frame": fr.parent_frame,
+                    "pose": {
+                        "position": {
+                            "x": fr.pose.position.x,
+                            "y": fr.pose.position.y,
+                            "z": fr.pose.position.z,
+                        },
+                        "orientation": {
+                            "x": fr.pose.orientation.x,
+                            "y": fr.pose.orientation.y,
+                            "z": fr.pose.orientation.z,
+                            "w": fr.pose.orientation.w,
+                        },
+                    },
+                    "properties_summary": {
+                        "is_vision_frame": p.vision_frame_properties.is_vision_frame,
+                        "is_laser_frame": p.laser_frame_properties.is_laser_frame,
+                        "is_glue_point": p.glue_pt_frame_properties.is_glue_point,
+                        "is_gripping_frame": p.gripping_frame_properties.is_gripping_frame,
+                        "is_assembly_frame": p.assembly_frame_properties.is_assembly_frame,
+                        "is_target_frame": p.assembly_frame_properties.is_target_frame,
+                    },
+                })
+
+            return json.dumps({
+                "success": True,
+                "obj_name": obj_name,
+                "frame_count": len(frames),
+                "frames": frames,
+            })
+
         except Exception as e:
-            return f"Error resolving service call: {e}"
+            return json.dumps({"success": False, "error": str(e)})
+
+    def _get_frame_properties(self, frame_name: str) -> str:
+        """Return full properties of a named frame from any object in the live scene."""
+        try:
+            self._ensure_scene_updated()
+            if self._current_scene is None:
+                return json.dumps({
+                    "success": False,
+                    "error": "No scene received yet. The /assembly_manager/scene topic may not be publishing.",
+                })
+
+            for obj in self._current_scene.objects_in_scene:
+                for fr in obj.ref_frames:
+                    if fr.frame_name == frame_name:
+                        p = fr.properties
+                        vp = p.vision_frame_properties
+                        gp = p.glue_pt_frame_properties
+                        lp = p.laser_frame_properties
+                        grf = p.gripping_frame_properties
+                        af = p.assembly_frame_properties
+                        return json.dumps({
+                            "success": True,
+                            "frame_name": fr.frame_name,
+                            "parent_frame": fr.parent_frame,
+                            "belongs_to_object": obj.obj_name,
+                            "pose": {
+                                "position": {
+                                    "x": fr.pose.position.x,
+                                    "y": fr.pose.position.y,
+                                    "z": fr.pose.position.z,
+                                },
+                                "orientation": {
+                                    "x": fr.pose.orientation.x,
+                                    "y": fr.pose.orientation.y,
+                                    "z": fr.pose.orientation.z,
+                                    "w": fr.pose.orientation.w,
+                                },
+                            },
+                            "properties": {
+                                "vision_frame": {
+                                    "is_vision_frame": vp.is_vision_frame,
+                                    "has_been_measured": vp.has_been_measured,
+                                },
+                                "glue_pt_frame": {
+                                    "is_glue_point": gp.is_glue_point,
+                                    "has_been_placed": gp.has_been_placed,
+                                    "has_been_cured": gp.has_been_cured,
+                                    "time_ms": gp.time_ms,
+                                    "dispense_offset_mm": gp.dispense_offset_mm,
+                                },
+                                "laser_frame": {
+                                    "is_laser_frame": lp.is_laser_frame,
+                                    "has_been_measured": lp.has_been_measured,
+                                },
+                                "gripping_frame": {
+                                    "is_gripping_frame": grf.is_gripping_frame,
+                                    "compatible_grippers": list(grf.compatible_grippers),
+                                    "compatible_gripper_tips": list(grf.compatible_gripper_tips),
+                                },
+                                "assembly_frame": {
+                                    "is_assembly_frame": af.is_assembly_frame,
+                                    "is_target_frame": af.is_target_frame,
+                                    "associated_frame": af.associated_frame,
+                                },
+                            },
+                        })
+
+            # Also check scene-level ref_frames (not attached to any object)
+            for fr in self._current_scene.ref_frames_in_scene:
+                if fr.frame_name == frame_name:
+                    return json.dumps({
+                        "success": True,
+                        "frame_name": fr.frame_name,
+                        "parent_frame": fr.parent_frame,
+                        "belongs_to_object": None,
+                        "note": "This is a scene-level frame (not attached to a specific object).",
+                        "pose": {
+                            "position": {
+                                "x": fr.pose.position.x,
+                                "y": fr.pose.position.y,
+                                "z": fr.pose.position.z,
+                            },
+                            "orientation": {
+                                "x": fr.pose.orientation.x,
+                                "y": fr.pose.orientation.y,
+                                "z": fr.pose.orientation.z,
+                                "w": fr.pose.orientation.w,
+                            },
+                        },
+                    })
+
+            all_frames = [
+                fr.frame_name
+                for obj in self._current_scene.objects_in_scene
+                for fr in obj.ref_frames
+            ]
+            return json.dumps({
+                "success": False,
+                "error": f"Frame '{frame_name}' not found in scene.",
+                "available_frames": all_frames,
+            })
+
+        except Exception as e:
+            return json.dumps({"success": False, "error": str(e)})
