@@ -5,3 +5,4 @@ assembly_database_path: "/home/match-pm/Documents/co_pilot_planning_test"
 # Subdirectories within the assembly database
 components_subdir: "Assembly_Part_Data"
 rsap_processes_subdir: "RSAP_Processes"
+knowledge_base_subdir: "Knowledge_Base"

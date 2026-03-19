@@ -19,7 +19,6 @@ setup(
         ('share/' + package_name, ['config/whitelist.yaml']),
         ('share/' + package_name, ['config/Prompts.yaml']),
         ('share/' + package_name, ['config/assembly_config.yaml']),
-        ('share/' + package_name, ['config/service_registry.yaml']),
         ('share/' + package_name + '/launch', ['launch/pm_co_pilot_planning.launch.py']),
     ],
     install_requires=['setuptools'],

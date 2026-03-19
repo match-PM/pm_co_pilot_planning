@@ -204,7 +204,7 @@ class AdapterLoadWorker(QObject):
 
         self.finished.emit()
 
-class PmCoPilotProgrammingApp(QMainWindow):
+class PmCoPilotPlanningApp(QMainWindow):
     sequence_modified = pyqtSignal()  # Signal to notify parent when sequence changes
     
     def __init__(self, service_node:Node, rsap_instance: RosSequentialActionProgrammer = None):

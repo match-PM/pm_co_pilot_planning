@@ -2,7 +2,7 @@ import rclpy
 from rclpy.node import Node
 from PyQt6.QtWidgets import QApplication
 import sys
-from pm_co_pilot_planning.submodules.PmCoPilotProgrammingApp import PmCoPilotProgrammingApp
+from pm_co_pilot_planning.submodules.PmCoPilotPlanningApp import PmCoPilotPlanningApp
 from rclpy.executors import MultiThreadedExecutor
 from rosidl_runtime_py.convert import message_to_ordereddict, get_message_slot_types
 from rosidl_runtime_py.set_message import set_message_fields
@@ -16,7 +16,7 @@ class PmCoPilotNode(Node):
         super().__init__('gpt_co_pilot')
         self.get_logger().info('PM Co-Pilot started!')
 
-        self.qt_window = PmCoPilotProgrammingApp(self)
+        self.qt_window = PmCoPilotPlanningApp(self)
         
 def main(args=None):
     rclpy.init(args=args)

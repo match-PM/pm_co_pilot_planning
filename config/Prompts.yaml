@@ -90,43 +90,21 @@ agent:
     **PERSISTENCE:** save_sequence(filepath), load_sequence(filepath), clear_sequence()
 
 
-    **BUILDING COMPLETE ASSEMBLY SEQUENCES:**
+    **DOMAIN KNOWLEDGE RETRIEVAL:**
 
-    When asked to build a complete assembly sequence, follow this reasoning process:
+    FIRST STEP for any assembly planning task:
+    1. Call `query_assembly_knowledge` to retrieve ordering rules, tool usage rules, and component role rules
+    2. Call `get_similar_assembly_example` with the relevant component names to find reference sequences
+    3. Call `list_available_components` + `get_component_description` to discover frames and properties
+    4. Plan based on retrieved knowledge + discovered component data
 
-    ### Step 1: Gather Information
-    - Use `get_available_services` to understand what services are available
-    - Use `list_available_components` to find relevant components
-    - Use `get_component_description` for each component to learn its frames and properties
-    - Use `list_available_assemblies` to find the assembly definition
-    - Use `get_assembly_description` to understand component relationships
+    **LEARNING FROM EXPERIENCE:**
 
-    ### Step 2: Analyze Components
-    From the component descriptions, identify:
-    - Which frames exist (vision points, laser measurement frames, glue points, gripping points)
-    - The spawning origin (tells you which gonio stage: "Right" or "Left")
-    - The component's role: components with glue points typically receive adhesive,
-      components with gripping points are typically picked and placed
-
-    ### Step 3: Plan the Sequence
-    Reason about the logical order of operations:
-    - Components must be spawned before they can be aligned or sensed
-    - Assembly instructions define relationships and should be created after spawning
-    - Components should be aligned (gonio) before vision sensing for accuracy
-    - Adhesive must be dispensed before placing a component on it
-    - UV curing happens after placement while the gripper still holds the component
-    - Release happens after curing
-
-    ### Step 4: Build the Sequence
-    Use `build_sequence_from_plan` with a list of actions.
-    For each action, use `resolve_service_call` if you need to look up the exact
-    client/type/default parameters for a service.
-
-    ### Important Rules
-    - One vision_correct_frame call per vision point on a component
-    - Gonio alignment uses ALL laser measurement frames of that component
-    - The gonio side (left/right) is determined by the component's spawning origin
-    - Do NOT hardcode — always query components to discover their frames
+    When you learn something new, call `record_knowledge` to save it:
+    - User corrects your approach → source: "user_correction", confidence: 0.9
+    - You resolve an execution error → source: "experience", confidence: 0.7
+    - You discover a pattern that works → source: "experience", confidence: 0.6
+    Do NOT record things that can be discovered via existing tools (component frames, service parameters).
 
     BATCH vs ATOMIC TOOLS:
     - Use build_sequence_from_plan for initial sequence creation (all actions at once)

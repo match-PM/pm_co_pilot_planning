@@ -288,7 +288,7 @@ class AssemblyKnowledgeTools:
             name="list_objects_in_scene",
             description=(
                 "Return all objects currently present in the live assembly scene. "
-                "Each entry contains the object name, its parent frame"
+                "Each entry contains the object name, its parent frame, and properties. "
                 "Use this to see what has already been spawned before planning actions."
             ),
             args_schema=EmptyInput,
@@ -548,7 +548,11 @@ class AssemblyKnowledgeTools:
             for obj in self._current_scene.objects_in_scene:
                 objects.append({
                     "obj_name": obj.obj_name,
-                    "parent_frame": obj.parent_frame
+                    "parent_frame": obj.parent_frame,
+                        "properties": {
+                            "is_gripped": obj.properties.is_gripped,
+                            "is_assembled": obj.properties.is_assembled,
+                        },
                 })
 
             return json.dumps({

@@ -22,8 +22,9 @@ from langgraph.graph import START, MessagesState, StateGraph
 
 from collections import defaultdict
 
-from pm_co_pilot_planning.submodules.langchain.tools.Tools import Tools
+from pm_co_pilot_planning.submodules.langchain.tools.RsapTools import RsapTools
 from pm_co_pilot_planning.submodules.langchain.tools.AssemblyKnowledgeTools import AssemblyKnowledgeTools
+from pm_co_pilot_planning.submodules.langchain.tools.KnowledgeTools import KnowledgeTools
 from pm_co_pilot_planning.submodules.langchain.LLMConfig import LLMConfig
 
 
@@ -36,16 +37,17 @@ class Agent:
 
     def __init__(self, service_node: Node, thread_id: str, rsap_instance=None):
 
-        # Use provided RSAP instance or create Tools with service_node
+        # Use provided RSAP instance or create RsapTools with service_node
         if rsap_instance:
-            tools_instance = Tools(service_node, rsap_instance=rsap_instance)
+            tools_instance = RsapTools(service_node, rsap_instance=rsap_instance)
             self.rsap_instance = rsap_instance
         else:
-            tools_instance = Tools(service_node)
+            tools_instance = RsapTools(service_node)
             self.rsap_instance = None
 
         assembly_knowledge = AssemblyKnowledgeTools(service_node)
-        
+        knowledge_tools = KnowledgeTools(service_node)
+
         # Initialize interaction log
         self.interaction_log = []
         
@@ -57,7 +59,12 @@ class Agent:
         
         # Comprehensive list of tools for RSAP control - ordered by efficiency
         self.tools = [
-            # ── Assembly knowledge (use first when planning a new sequence) ──────
+            # ── Domain knowledge (use first to retrieve learned rules) ───────────
+            knowledge_tools.query_assembly_knowledge_tool,
+            knowledge_tools.get_similar_assembly_example_tool,
+            knowledge_tools.record_knowledge_tool,
+
+            # ── Assembly knowledge (use when planning a new sequence) ────────────
             assembly_knowledge.list_available_components_tool,
             assembly_knowledge.get_component_description_tool,
             assembly_knowledge.list_available_assemblies_tool,

@@ -93,7 +93,7 @@ class LoadAndModifySequenceInput(BaseModel):
     )
 
 
-class Tools:
+class RsapTools:
     """
     The Tools class provides a set of tools that can be used by the agent.
     Each tool is a function that performs a specific action to control the RosSequentialActionProgrammer.
@@ -585,13 +585,16 @@ class Tools:
             if index is None:
                 return json.dumps({"success": False, "error": "index is required"})
             
-            if not parameters or not isinstance(parameters, dict):
+            if not isinstance(parameters, dict):
                 return json.dumps({
-                    "success": False, 
-                    "error": "'parameters' dict is required. You must provide the parameter values to set.",
+                    "success": False,
+                    "error": "'parameters' must be a dict of parameter key-value pairs.",
                     "expected_format": {"index": "<int>", "parameters": {"param_name": "value", "...":  "..."}},
                     "hint": "Use get_service_parameters or get_action_parameters to discover the parameter names first."
                 })
+
+            if not parameters:
+                return json.dumps({"success": True, "message": f"No parameters to set for action at position {index}"})
 
             # Check if index is valid BEFORE converting
             current_length = len(self.rsap.action_list)
