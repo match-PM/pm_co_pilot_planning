@@ -1093,7 +1093,7 @@ class RsapTools:
                 value_set_names = value_set_generator.value_sets.get_all_value_set_names()
 
             # Filter out unnecessary value sets (too much information for agent)
-            excluded_sets = {'tf_frames', 'vision_cameras', 'vision_processes', 'test_set_1', 'test_set_2', 'test_set_3', 'test_set_4'}
+            excluded_sets = {'vision_cameras', 'vision_processes', 'test_set_1', 'test_set_2', 'test_set_3', 'test_set_4'}
             value_set_names = [name for name in value_set_names if name not in excluded_sets]
 
             # Build detailed response with actual values

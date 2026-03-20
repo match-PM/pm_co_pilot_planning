@@ -61,7 +61,7 @@ class Agent:
         self.tools = [
             # ── Domain knowledge (use first to retrieve learned rules) ───────────
             knowledge_tools.query_assembly_knowledge_tool,
-            knowledge_tools.get_similar_assembly_example_tool,
+            # knowledge_tools.get_similar_assembly_example_tool,
             knowledge_tools.record_knowledge_tool,
 
             # ── Assembly knowledge (use when planning a new sequence) ────────────

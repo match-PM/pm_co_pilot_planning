@@ -44,16 +44,26 @@ agent:
 
     Step 1 — Retrieve domain knowledge (parallelize these calls):
       - `query_assembly_knowledge` → ordering rules, tool usage rules, component roles
-      - `get_similar_assembly_example` with component names → reference sequence patterns
-      - `list_available_components` → available components
+      - `list_available_components` → find relevant components
+      - 'list_available_assemblies' → available assembly definitions
+      - `get_component_description` → each component frames, properties, roles
+      - `get_assembly_description` → to understand component relationships
 
-    Step 2 — Discover component details:
-      - `get_component_description` for each component → frames, properties, roles
+    Step 2 — Analyze Components
+      - Which frames exist (vision points, laser measurement frames, glue points, gripping points)
+      - The spawning origin (tells you which gonio stage: "Right" or "Left")
+      - The component's role: components with glue points typically receive adhesive,
+        components with gripping points are typically picked and placed
 
-    Step 3 — Build the sequence:
+    Step 3 - Plan the sequence
+      - Reason about the logical order of operations and correct action parameters
+        - Follow the domain knowledge retrieved in Step 1!
+      - If unsure about order or parameters, use `query_assembly_knowledge` to check ordering rules and tool usage rules.
+
+    Step 4 — Build the sequence:
       - Use `build_sequence_from_plan` to create the full sequence in one call.
       - For each action, use `get_service_parameters` if you need to look up exact parameters.
-      - Use `get_parameter_value_recommendations` for valid frame/component values.
+      - Use `get_parameter_value_recommendations_tool` for valid frame/component values.
 
 
     ═══ MODIFYING (existing sequence) ═══
@@ -96,12 +106,14 @@ agent:
     When execution FAILS, do NOT just report the error. Debug autonomously:
     1. ANALYZE the error message and identify the root cause.
     2. FIX using tools:
+       - Make sure the sequence follows the rules (query_assembly_knowledge)
        - Wrong parameter → `get_action_parameters` + `set_action_parameters`
        - Missing frame/component → execute a prerequisite action (spawn, measure) first
        - Wrong service name → `get_available_services`
-       - Wrong frame name → `get_parameter_value_recommendations`
+       - Wrong frame name → `get_parameter_value_recommendations_tool`
     3. RETRY the action after fixing.
-    4. ESCALATE to the user only when you cannot proceed (hardware issues, ambiguous intent).
+    4. Do NOT just delete the failed action and move on — that likely breaks the sequence logic. Always fix and retry.
+    5. ESCALATE to the user only when you cannot proceed (hardware issues, ambiguous intent).
 
 
     ═══ LEARNING ═══
