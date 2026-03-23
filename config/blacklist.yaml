@@ -1,5 +1,6 @@
 # hide service clients with the following names
 clients_by_name:
+  - '/assembly_manager/create_assembly_instructions'
   - '/moveit_component_spawner/destroy_object'
   - '/moveit_component_spawner/spawn_object'
   - '/apply_planning_scene'

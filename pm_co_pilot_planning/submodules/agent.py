@@ -233,7 +233,7 @@ class Agent:
                         )
                         for i, resp in enumerate(tool_responses, 1):
                             self.service_node.get_logger().info(
-                                f"     {i}. {resp['content'][:100]}"
+                                f"     {i}. {resp['content']}"
                             )
                 
                 step_details.append(step_log)

@@ -2,6 +2,7 @@ from langchain_core.tools import Tool, tool, StructuredTool
 from pydantic import BaseModel, Field
 from rclpy.node import Node
 
+import yaml
 import json
 import copy
 import threading
@@ -336,10 +337,20 @@ class RsapTools:
         try:
             self.rsap.initialize_service_list()
             services = self.rsap.get_active_services()
-            # Filter by whitelist if available
-            # filtered_services = self.rsap.get_active_client_blklist()
+            # Filter by whitelist, then remove services in this repo's blacklist.yaml
             filtered_services = self.rsap.get_active_client_whtlist()
-            result = [{"client": svc[0], "type": svc[1][0]} for svc in services if svc[0] in filtered_services]
+            try:
+                blacklist_path = get_package_share_directory('pm_co_pilot_planning') + '/blacklist.yaml'
+                with open(blacklist_path, 'r') as f:
+                    blacklist = yaml.safe_load(f)
+                blacklisted_names = set(blacklist.get('clients_by_name', []))
+                blacklisted_types = set(blacklist.get('clients_by_type', []))
+                result = [{"client": svc[0], "type": svc[1][0]} for svc in services
+                          if svc[0] in filtered_services
+                          and svc[0] not in blacklisted_names
+                          and svc[1][0] not in blacklisted_types]
+            except Exception as e:
+                result = [{"client": svc[0], "type": svc[1][0]} for svc in services if svc[0] in filtered_services]
             return json.dumps({"services": result, "count": len(result)})
         except Exception as e:
             return json.dumps({"error": str(e)})
@@ -1153,21 +1164,33 @@ class RsapTools:
             if not isinstance(service_clients, list):
                 return json.dumps({"success": False, "error": "service_clients must be a string or list of strings"})
 
-            # Check if services are active (using whitelist filtering like _get_available_services)
+            # Check if services are active (using whitelist + this repo's blacklist.yaml)
             self.rsap.initialize_service_list()
             services = self.rsap.get_active_services()
-            filtered_services = self.rsap.get_active_client_whtlist()
-            available_clients = [svc[0] for svc in services if svc[0] in filtered_services]
-            
+            filtered_services = set(self.rsap.get_active_client_whtlist())
+            try:
+                blacklist_path = get_package_share_directory('pm_co_pilot_planning') + '/blacklist.yaml'
+                with open(blacklist_path, 'r') as f:
+                    blacklist = yaml.safe_load(f)
+                blacklisted_names = set(blacklist.get('clients_by_name', []))
+                blacklisted_types = set(blacklist.get('clients_by_type', []))
+            except Exception:
+                blacklisted_names = set()
+                blacklisted_types = set()
+            available_clients = [svc[0] for svc in services
+                                  if svc[0] in filtered_services
+                                  and svc[0] not in blacklisted_names
+                                  and svc[1][0] not in blacklisted_types]
+
             missing_services = [svc for svc in service_clients if svc not in available_clients]
             if missing_services:
                 # Check if they exist in unfiltered list
                 all_active_clients = [svc[0] for svc in services]
                 in_system_but_filtered = [svc for svc in missing_services if svc in all_active_clients]
-                
+
                 error_msg = f"Service(s) not found in available services: {', '.join(missing_services)}."
                 if in_system_but_filtered:
-                    error_msg += f" Note: {', '.join(in_system_but_filtered)} exist but may be filtered by whitelist."
+                    error_msg += f" Note: {', '.join(in_system_but_filtered)} exist but may be filtered by whitelist/blacklist."
                 else:
                     error_msg += " Make sure the service(s) are running."
                 

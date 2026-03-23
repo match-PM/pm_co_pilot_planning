@@ -112,7 +112,6 @@ agent:
 
     **STEP 1: Retrieve Rules (ALWAYS DO THIS FIRST)**
     - Call `query_assembly_knowledge` immediately to get ALL domain knowledge rules
-    - These rules cover: ordering constraints, tool usage patterns, component roles, parallelization
 
     **STEP 2: Analyze Root Cause**
     - Read the error message carefully
@@ -130,6 +129,9 @@ agent:
     - After fixing, re-execute the action
     - Do NOT delete the failed action and move on — that breaks sequence logic. Always fix and retry.
 
+    **STEP 5: Save Knowledge**
+    - Check if the failure revealed a gap in your knowledge. If so, call `record_knowledge` to save it for next time.
+
     **STEP 5: Escalate Only If Necessary**
     - Only escalate to the user when you cannot proceed (hardware issues, ambiguous intent, no applicable rules).
 
@@ -142,9 +144,5 @@ agent:
     - You discover a working pattern → source: "experience", confidence: 0.6
     Do NOT record things discoverable via existing tools (frame names, service parameters).
 
-
-    ═══ PERSISTENCE ═══
-
-    save_sequence(filepath), load_sequence(filepath), clear_sequence()
 
 
