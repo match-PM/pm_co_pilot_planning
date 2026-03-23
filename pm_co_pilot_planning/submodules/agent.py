@@ -40,12 +40,13 @@ class Agent:
         # Use provided RSAP instance or create RsapTools with service_node
         if rsap_instance:
             tools_instance = RsapTools(service_node, rsap_instance=rsap_instance)
+            assembly_knowledge = AssemblyKnowledgeTools(service_node, rsap_instance=rsap_instance)
             self.rsap_instance = rsap_instance
         else:
             tools_instance = RsapTools(service_node)
+            assembly_knowledge = AssemblyKnowledgeTools(service_node)
             self.rsap_instance = None
 
-        assembly_knowledge = AssemblyKnowledgeTools(service_node)
         knowledge_tools = KnowledgeTools(service_node)
 
         # Initialize interaction log
@@ -75,6 +76,7 @@ class Agent:
             assembly_knowledge.get_object_properties_tool,
             assembly_knowledge.get_object_frames_tool,
             assembly_knowledge.get_frame_properties_tool,
+            assembly_knowledge.get_frames_in_scene_tool,
 
             # ── Efficient query tools ─────────────────────────────────────────────
             tools_instance.get_action_at_index_tool,        # For "what's at index X?"
@@ -84,7 +86,7 @@ class Agent:
             # ── Service/Action discovery ──────────────────────────────────────────
             tools_instance.get_available_services_tool,
             tools_instance.get_service_parameters_tool,
-            tools_instance.get_parameter_value_recommendations_tool,
+            # tools_instance.get_parameter_value_recommendations_tool,
 
             # ── Batch sequence building (preferred for new complete sequences) ────
             tools_instance.build_sequence_from_plan_tool,

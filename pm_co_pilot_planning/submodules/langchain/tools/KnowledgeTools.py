@@ -24,20 +24,7 @@ from ament_index_python.packages import get_package_share_directory
 # ---------------------------------------------------------------------------
 
 class QueryKnowledgeInput(BaseModel):
-    category: str = Field(
-        default="",
-        description=(
-            "Optional category filter: ordering, tool_usage, component_role, "
-            "parallelization, error_recovery. Empty string returns all categories."
-        ),
-    )
-    tags: List[str] = Field(
-        default_factory=list,
-        description=(
-            "Optional list of tags to filter by. Rules matching ANY of these tags "
-            "are returned. Empty list returns all rules in the category."
-        ),
-    )
+    pass
 
 
 class GetExampleInput(BaseModel):
@@ -162,13 +149,9 @@ class KnowledgeTools:
             func=self._query_assembly_knowledge,
             name="query_assembly_knowledge",
             description=(
-                "Retrieve domain knowledge rules from the knowledge base. "
-                "Rules cover assembly ordering constraints, tool usage patterns, "
-                "component roles, parallelization, and error recovery lessons.\n\n"
-                "ALWAYS call this FIRST when planning a new assembly sequence.\n"
-                "Filter by category (ordering, tool_usage, component_role, etc.) "
-                "and/or tags. Returns rules sorted by authority (user corrections > "
-                "experience > bootstrap) and confidence."
+                "Return ALL domain knowledge rules (ordering constraints, tool usage "
+                "patterns, component roles, parallelization, error recovery). "
+                "ALWAYS call this FIRST when planning a new assembly sequence."
             ),
             args_schema=QueryKnowledgeInput,
         )
@@ -205,28 +188,14 @@ class KnowledgeTools:
     # Internal implementations
     # ------------------------------------------------------------------
 
-    def _query_assembly_knowledge(self, category: str = "", tags: List[str] = None) -> str:
-        """Retrieve rules filtered by category and/or tags."""
-        if tags is None:
-            tags = []
+    def _query_assembly_knowledge(self) -> str:
+        """Return all non-superseded rules sorted by authority and confidence."""
         try:
             data = _load_rules(self._rules_path)
             rules = data.get("rules", [])
 
             # Filter out superseded rules
             rules = [r for r in rules if "superseded_by" not in r]
-
-            # Filter by category
-            if category:
-                rules = [r for r in rules if r.get("category", "") == category]
-
-            # Filter by tags (match ANY)
-            if tags:
-                tag_set = set(t.lower() for t in tags)
-                rules = [
-                    r for r in rules
-                    if tag_set & set(t.lower() for t in r.get("tags", []))
-                ]
 
             # Sort by authority and confidence
             rules.sort(key=_rule_sort_key)

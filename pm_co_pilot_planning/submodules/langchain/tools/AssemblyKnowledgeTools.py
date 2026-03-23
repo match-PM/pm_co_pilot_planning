@@ -26,6 +26,7 @@ import assembly_manager_interfaces.msg as am_msgs
 import rclpy
 from rosidl_runtime_py.convert import message_to_ordereddict
 from rosidl_runtime_py.set_message import set_message_fields
+from ros_sequential_action_programmer.submodules.RosSequentialActionProgrammer import RosSequentialActionProgrammer
 
 
 # ---------------------------------------------------------------------------
@@ -197,10 +198,14 @@ class AssemblyKnowledgeTools:
     Pass a ROS node for logging; RSAP instance is not required.
     """
 
-    def __init__(self, service_node: Node):
+    def __init__(self, service_node: Node, rsap_instance = None):
         self.service_node = service_node
         self.service_node.get_logger().info("Initializing AssemblyKnowledgeTools...")
         self._current_scene: Optional[am_msgs.ObjectScene] = None
+        if rsap_instance:
+            self.rsap = rsap_instance
+        else:
+            self.rsap = RosSequentialActionProgrammer(service_node)
 
         # Subscribe to the live assembly scene
         self._scene_sub = self.service_node.create_subscription(
@@ -326,6 +331,16 @@ class AssemblyKnowledgeTools:
                 "Searches across all objects in the scene."
             ),
             args_schema=GetFramePropertiesInput,
+        )
+
+        self.get_frames_in_scene_tool = StructuredTool.from_function(
+            func=self._get_frames_in_scene,
+            name="get_frames_in_scene", 
+            description=(
+                "Return all frames currently present in the live assembly scene. "
+                "frames_in_scene and tf_frames"
+            ),
+            args_schema=EmptyInput,
         )
 
     # ------------------------------------------------------------------
@@ -756,6 +771,73 @@ class AssemblyKnowledgeTools:
                 "success": False,
                 "error": f"Frame '{frame_name}' not found in scene.",
                 "available_frames": all_frames,
+            })
+
+        except Exception as e:
+            return json.dumps({"success": False, "error": str(e)})
+
+
+    def _get_frames_in_scene(self, parameter_type: Optional[str] = None) -> str:
+        """Get frames in the current scene. frames_in_scene + tf_frames"""
+        try:
+            # Access the parameter value set generator through RSAP
+            if not hasattr(self.rsap, 'action_parameter_value_manager'):
+                return json.dumps({
+                    "success": False,
+                    "error": "Parameter value manager not available in RSAP instance"
+                })
+
+            param_manager = self.rsap.action_parameter_value_manager
+            
+            # Access the parameter values set generator (note: it's "values" not "value")
+            if hasattr(param_manager, 'parameter_values_set_generator'):
+                value_set_generator = param_manager.parameter_values_set_generator
+            elif hasattr(param_manager, 'parameter_value_set_generator'):
+                value_set_generator = param_manager.parameter_value_set_generator
+            elif hasattr(param_manager, 'value_sets'):
+                # Manager is the generator itself
+                value_set_generator = param_manager
+            else:
+                # Debug: log what attributes the manager has
+                available_attrs = [attr for attr in dir(param_manager) if not attr.startswith('_')]
+                return json.dumps({
+                    "success": False,
+                    "error": f"Parameter value set generator not available. Available attributes: {available_attrs}"
+                })
+            
+            # Update the value sets to get latest data (TF frames, assembly scene, etc.)
+            if hasattr(value_set_generator, 'update'):
+                value_set_generator.update()
+
+            # Get value sets
+            if parameter_type:
+                # Get sets compatible with specific type
+                value_set_names = value_set_generator.value_sets.get_all_value_set_names(parameter_type)
+            else:
+                # Get all value sets
+                value_set_names = value_set_generator.value_sets.get_all_value_set_names()
+
+            # Filter out unnecessary value sets (too much information for agent)
+            excluded_sets = {'components_in_scene','instructions_in_scene','vision_cameras', 'vision_processes', 'test_set_1', 'test_set_2', 'test_set_3', 'test_set_4'}
+            value_set_names = [name for name in value_set_names if name not in excluded_sets]
+
+            # Build detailed response with actual values
+            recommendations = {}
+            for set_name in value_set_names:
+                try:
+                    value_set = value_set_generator.value_sets.get_set_for_set_name(set_name)
+                    recommendations[set_name] = {
+                        "type": value_set.value_set_type,
+                        "values": value_set.get_values_list()
+                    }
+                except Exception as e:
+                    self.service_node.get_logger().warn(f"Could not get values for set '{set_name}': {e}")
+
+            return json.dumps({
+                "success": True,
+                "parameter_type": parameter_type if parameter_type else "all",
+                "value_sets": recommendations,
+                "count": len(recommendations)
             })
 
         except Exception as e:

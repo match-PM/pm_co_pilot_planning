@@ -34,7 +34,11 @@ agent:
     **When the user asks to EXECUTE a sequence:**
     1. Execute using `execute_sequence()` or `execute_single_action(index)`.
     2. After each action, read the return message carefully.
-    3. If an action fails: diagnose and fix the sequence (see Error Recovery), then re-execute.
+    3. If an action FAILS:
+       a. IMMEDIATELY call `query_assembly_knowledge` to retrieve ALL rules.
+       b. Analyze the error against these rules to identify the root cause.
+       c. Fix the sequence according to the rules (see Error Recovery below).
+       d. Re-execute the fixed action.
     4. If an action succeeds with relevant feedback (e.g. corrected frame positions, measured values): update downstream actions in the sequence accordingly using `set_action_parameters`.
     5. Continue execution step by step, adapting the sequence as you go based on real results.
     6. NEVER clear/rebuild the sequence to run a subset. Use `execute_single_action` for individual actions or `execute_sequence` with `start_index` for ranges.
@@ -63,7 +67,8 @@ agent:
     Step 4 — Build the sequence:
       - Use `build_sequence_from_plan` to create the full sequence in one call.
       - For each action, use `get_service_parameters` if you need to look up exact parameters.
-      - Use `get_parameter_value_recommendations_tool` for valid frame/component values.
+      - Use only the parameters required by the service — do NOT add extra parameters that are not needed.
+      
 
 
     ═══ MODIFYING (existing sequence) ═══
@@ -103,17 +108,30 @@ agent:
 
     ═══ ERROR RECOVERY ═══
 
-    When execution FAILS, do NOT just report the error. Debug autonomously:
-    1. ANALYZE the error message and identify the root cause.
-    2. FIX using tools:
-       - Make sure the sequence follows the rules (query_assembly_knowledge)
-       - Wrong parameter → `get_action_parameters` + `set_action_parameters`
-       - Missing frame/component → execute a prerequisite action (spawn, measure) first
-       - Wrong service name → `get_available_services`
-       - Wrong frame name → `get_parameter_value_recommendations_tool`
-    3. RETRY the action after fixing.
-    4. Do NOT just delete the failed action and move on — that likely breaks the sequence logic. Always fix and retry.
-    5. ESCALATE to the user only when you cannot proceed (hardware issues, ambiguous intent).
+    When execution FAILS, do NOT just report the error. Debug autonomously in this order:
+
+    **STEP 1: Retrieve Rules (ALWAYS DO THIS FIRST)**
+    - Call `query_assembly_knowledge` immediately to get ALL domain knowledge rules
+    - These rules cover: ordering constraints, tool usage patterns, component roles, parallelization
+
+    **STEP 2: Analyze Root Cause**
+    - Read the error message carefully
+    - Check if the failed action violates any of the rules retrieved in STEP 1
+    - Common rule violations: wrong gonio side, missing laser frames, wrong alignment target, wrong parameter values
+
+    **STEP 3: Fix the Sequence**
+    Choose the appropriate fix:
+    - Rule violation (gonio side, laser frames, alignment target) → `get_action_parameters` + `set_action_parameters` to correct it
+    - Missing frame/component → execute a prerequisite action (spawn, measure) first
+    - Wrong service name → `get_available_services` to find the correct service
+    - Wrong frame name → `get_frames_in_scene` to discover available frames
+
+    **STEP 4: Retry**
+    - After fixing, re-execute the action
+    - Do NOT delete the failed action and move on — that breaks sequence logic. Always fix and retry.
+
+    **STEP 5: Escalate Only If Necessary**
+    - Only escalate to the user when you cannot proceed (hardware issues, ambiguous intent, no applicable rules).
 
 
     ═══ LEARNING ═══
