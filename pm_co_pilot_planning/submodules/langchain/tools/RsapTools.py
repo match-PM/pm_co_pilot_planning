@@ -16,7 +16,7 @@ from rosidl_runtime_py.set_message import set_message_fields
 class SetActionParametersInput(BaseModel):
     """Input schema for set_action_parameters tool."""
     index: int = Field(description="1-based index of the action in the sequence (GUI index)")
-    parameters: Dict[str, Any] = Field(default_factory=dict, description="Dictionary of parameter key-value pairs to set. For nested messages like Vector3 or Quaternion, use nested dictionaries.")
+    parameters: Dict[str, Any] = Field(description="Dictionary of parameter key-value pairs to set. REQUIRED - must contain at least one key-value pair. Use get_action_parameters first to discover available parameter names. For nested messages like Vector3 or Quaternion, use nested dictionaries.")
 
 
 class MoveActionInput(BaseModel):
@@ -585,16 +585,13 @@ class RsapTools:
             if index is None:
                 return json.dumps({"success": False, "error": "index is required"})
             
-            if not isinstance(parameters, dict):
+            if not parameters or not isinstance(parameters, dict):
                 return json.dumps({
-                    "success": False,
-                    "error": "'parameters' must be a dict of parameter key-value pairs.",
+                    "success": False, 
+                    "error": "'parameters' dict is required. You must provide the parameter values to set.",
                     "expected_format": {"index": "<int>", "parameters": {"param_name": "value", "...":  "..."}},
                     "hint": "Use get_service_parameters or get_action_parameters to discover the parameter names first."
                 })
-
-            if not parameters:
-                return json.dumps({"success": True, "message": f"No parameters to set for action at position {index}"})
 
             # Check if index is valid BEFORE converting
             current_length = len(self.rsap.action_list)
