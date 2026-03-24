@@ -270,6 +270,7 @@ class Agent:
         total_input_tokens = 0
         total_output_tokens = 0
         step_details = []  # Store detailed step information
+        last_logged_message = None  # Track last message to avoid duplicates
 
         try:
             # Stream to see each step
@@ -279,8 +280,14 @@ class Agent:
                 self.config,
                 stream_mode="values"
             ):
-                step_count += 1
                 last_message = step["messages"][-1]
+                
+                # Skip duplicate messages (same message appearing in consecutive stream events)
+                if last_logged_message is not None and last_message is last_logged_message:
+                    continue
+                
+                step_count += 1
+                last_logged_message = last_message
 
                 # Create step log entry with model/phase tracking
                 step_log = {
