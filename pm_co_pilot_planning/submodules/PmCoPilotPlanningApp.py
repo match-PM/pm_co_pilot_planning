@@ -565,6 +565,6 @@ class PmCoPilotPlanningApp(QMainWindow):
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
-    mainWin = PmCoPilotProgrammingApp()
+    mainWin = PmCoPilotPlanningApp()
     mainWin.show()
     sys.exit(app.exec())
