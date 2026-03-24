@@ -6,10 +6,13 @@ from langchain.chat_models import init_chat_model
 class LLMConfig:
 
     def __init__(self, llm_tool: str):
-        path = get_package_share_directory("pm_co_pilot_planning")        
-        prompt = path + '/Prompts.yaml'        
+        path = get_package_share_directory("pm_co_pilot_planning")
+        prompt = path + '/Prompts.yaml'
         with open(prompt, 'r') as file:
             config_data = yaml.safe_load(file)
+            # Fallback to 'agent' key if requested key doesn't exist (backward compat)
+            if llm_tool not in config_data and 'agent' in config_data:
+                llm_tool = 'agent'
             tool = config_data[llm_tool]
             self.model = config_data[llm_tool]['model']
             self.model_provider = config_data[llm_tool]['model_provider']
@@ -17,7 +20,7 @@ class LLMConfig:
             self.system_prompt = config_data[llm_tool]['system_prompt']
 
         self.llm = init_chat_model(
-            self.model, 
-            model_provider=self.model_provider, 
+            self.model,
+            model_provider=self.model_provider,
             temperature=self.temperature
         )

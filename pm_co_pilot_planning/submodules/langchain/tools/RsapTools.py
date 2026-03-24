@@ -905,10 +905,10 @@ class RsapTools:
                     result["failed_action_name"] = failed_action.get_name() if hasattr(failed_action, 'get_name') else str(failed_action)
                     log_entry = failed_action.get_log_entry() if hasattr(failed_action, 'get_log_entry') else {}
                     if log_entry:
+                        if log_entry.get("service_client"):
+                            result["service_client"] = log_entry["service_client"]
                         if log_entry.get("message"):
                             result["error_message"] = log_entry["message"]
-                        if log_entry.get("execution_time"):
-                            result["execution_time"] = log_entry["execution_time"]
                     # Also check response_dict for error info
                     if hasattr(failed_action, 'response_dict') and failed_action.response_dict:
                         response = dict(failed_action.response_dict)
@@ -975,10 +975,10 @@ class RsapTools:
                 action = self.rsap.get_action_at_index(internal_index)
                 log_entry = action.get_log_entry() if hasattr(action, 'get_log_entry') else {}
                 if log_entry:
+                    if log_entry.get("service_client"):
+                        result["service_client"] = log_entry["service_client"]
                     if log_entry.get("message"):
                         result["error_message"] = log_entry["message"]
-                    if log_entry.get("execution_time"):
-                        result["execution_time"] = log_entry["execution_time"]
                 # Also check response_dict for error info (e.g. "Client not available")
                 if hasattr(action, 'response_dict') and action.response_dict:
                     response = dict(action.response_dict)

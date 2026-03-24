@@ -27,7 +27,7 @@ class QueryKnowledgeInput(BaseModel):
     service_name: str = Field(
         default="",
         description=(
-            "Optional: exact ROS2 service path to query knowledge for "
+            "Optional: exact ROS2 service_client to query knowledge for "
             "(e.g. '/pm_skills/vision_correct_frame'). "
             "If empty, returns ALL service knowledge and general knowledge."
         ),
@@ -49,7 +49,7 @@ class RecordKnowledgeInput(BaseModel):
     service_name: str = Field(
         default="",
         description=(
-            "Exact ROS2 service path to record knowledge for "
+            "Exact ROS2 service_client to record knowledge for "
             "(e.g. '/pm_skills/iterative_gonio_align'). "
             "If empty, records to general_knowledge."
         ),
@@ -167,7 +167,7 @@ class KnowledgeTools:
             func=self._query_assembly_knowledge,
             name="query_assembly_knowledge",
             description=(
-                "Return service-centric domain knowledge: preconditions, postconditions, "
+                "Return service domain knowledge: preconditions, postconditions, "
                 "usage notes, and learned entries for each service.\n\n"
                 "- Call with NO arguments to get ALL services + general knowledge (for planning).\n"
                 "- Call with service_name to get knowledge for a specific service (for error recovery).\n\n"
@@ -194,7 +194,7 @@ class KnowledgeTools:
             name="record_knowledge",
             description=(
                 "Save new knowledge to the service knowledge base.\n\n"
-                "Specify a service_name to add to a specific service's entry, "
+                "Specify a service_client to add to a specific service's entry, "
                 "or leave empty to add to general_knowledge.\n\n"
                 "Fields you can add to:\n"
                 "  - 'preconditions': add a new fact token that must be true before calling this service\n"

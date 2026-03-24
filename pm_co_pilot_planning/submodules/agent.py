@@ -9,10 +9,9 @@ from rclpy.node import Node
 from langchain_core.tools import BaseTool
 from langchain_core.tools import tool
 
-from langchain_core.messages import HumanMessage, AIMessage, FunctionMessage
+from langchain_core.messages import HumanMessage, AIMessage, FunctionMessage, SystemMessage, ToolMessage
 from langgraph.prebuilt import create_react_agent
 
-from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder, SystemMessagePromptTemplate
 
 from langchain.chat_models import init_chat_model
 from langchain_community.tools.tavily_search import TavilySearchResults
@@ -28,11 +27,17 @@ from pm_co_pilot_planning.submodules.langchain.tools.KnowledgeTools import Knowl
 from pm_co_pilot_planning.submodules.langchain.LLMConfig import LLMConfig
 
 
+# Keywords that indicate the user wants to execute (not plan/build)
+_EXECUTE_KEYWORDS = ["execute", "run the sequence", "run it", "start execution", "run all"]
+
 
 class Agent:
     """
     The Agent class is responsible for managing the interaction with the LLM.
-    It handles the conversation history and the tools available to the LLM.
+    It uses a dual-model architecture:
+      - Planner (expensive model): for building sequences, modifying, and complex error diagnosis
+      - Executor (cheap model): for running actions and handling routine errors
+    A pre_model_hook windows the context during execution to avoid O(n^2) token growth.
     """
 
     def __init__(self, service_node: Node, thread_id: str, rsap_instance=None):
@@ -51,14 +56,34 @@ class Agent:
 
         # Initialize interaction log
         self.interaction_log = []
-        
-        llm_config = LLMConfig('agent')
-        
+
+        # ── Load dual model configs ─────────────────────────────────────────────
+        planner_config = LLMConfig('planner')
+        executor_config = LLMConfig('executor')
+
         # Store model info for logging
-        self.model_name = llm_config.model
-        self.model_provider = llm_config.model_provider
-        
-        # Comprehensive list of tools for RSAP control - ordered by efficiency
+        self.model_name = planner_config.model  # primary model for log filenames
+        self.model_provider = planner_config.model_provider
+        self.model_configs = {
+            "planning": {"name": planner_config.model, "provider": planner_config.model_provider},
+            "executing": {"name": executor_config.model, "provider": executor_config.model_provider},
+            "escalated": {"name": planner_config.model, "provider": planner_config.model_provider},
+        }
+
+        # ── Phase tracking ──────────────────────────────────────────────────────
+        self.current_phase = "planning"  # "planning" | "executing" | "escalated"
+        self.consecutive_exec_failures = 0  # track execution failures for auto-escalate
+
+
+        # ── System prompts (injected via pre_model_hook) ────────────────────────
+        self._planner_system_prompt = planner_config.system_prompt
+        self._executor_system_prompt = executor_config.system_prompt
+
+        # Context window size for executor (number of recent messages to keep)
+        # ~20 messages ≈ last 10 tool call/response pairs, enough for 2-3 retry cycles
+        self.executor_context_window = 20
+
+        # ── Full tool set for planner ───────────────────────────────────────────
         self.tools = [
             # ── Domain knowledge (use first to retrieve learned rules) ───────────
             knowledge_tools.query_assembly_knowledge_tool,
@@ -113,52 +138,139 @@ class Agent:
             # ── Heavy (use sparingly) ─────────────────────────────────────────────
             tools_instance.get_action_list_tool,
         ]
-        
-        # Bind tools to the model with parallel_tool_calls enabled
-        # This allows models to emit multiple tool calls in a single response
-        # The threading lock in Tools.py ensures correct sequential execution when needed
-        self.model = llm_config.llm.bind_tools(self.tools, parallel_tool_calls=True)
-        
-        self.prompt = ChatPromptTemplate.from_messages([
-            ("system", llm_config.system_prompt),
-            MessagesPlaceholder(variable_name="messages"),
-        ])
-        
+
+        # ── Minimal tool subset for executor ────────────────────────────────────
+        self.executor_tools = [
+            tools_instance.execute_single_action_tool,
+            tools_instance.execute_sequence_tool,
+            tools_instance.get_action_at_index_tool,
+            tools_instance.get_action_parameters_tool,
+            tools_instance.set_action_parameters_tool,
+            tools_instance.get_sequence_summary_tool,
+            tools_instance.get_available_services_tool,
+            tools_instance.get_service_parameters_tool,
+            knowledge_tools.query_assembly_knowledge_tool,
+            knowledge_tools.record_knowledge_tool,
+            assembly_knowledge.list_objects_in_scene_tool,
+            assembly_knowledge.get_object_properties_tool,
+            assembly_knowledge.get_object_frames_tool,
+            assembly_knowledge.get_frame_properties_tool,
+            assembly_knowledge.get_frames_in_scene_tool,
+        ]
+
+        # ── Bind tools to each model ───────────────────────────────────────────
+        # Planner gets all tools, executor gets the minimal subset
+        self.planner_model = planner_config.llm.bind_tools(self.tools, parallel_tool_calls=True)
+        self.executor_model = executor_config.llm.bind_tools(self.executor_tools, parallel_tool_calls=True)
+
         self.memory = MemorySaver()
         self.config = {
             "configurable": {"thread_id": thread_id},
-            "recursion_limit": 100  
+            "recursion_limit": 100
         }
         self.service_node = service_node
 
         # When  app starts, try to load any previously saved memory state
         # self.load_memory()
 
-        self.service_node.get_logger().info(f"Agent initialized with model: {llm_config.model}")
+        self.service_node.get_logger().info(
+            f"Agent initialized — planner: {planner_config.model}, executor: {executor_config.model}"
+        )
 
+    # ── Dynamic model selection ─────────────────────────────────────────────────
+
+    def _select_model(self, state, runtime=None):
+        """Return the executor model during execution, planner model otherwise."""
+        if self.current_phase == "executing":
+            return self.executor_model
+        return self.planner_model
+
+    # ── Pre-model hook for context windowing ────────────────────────────────────
+
+    def _pre_model_hook(self, state):
+        """Control what messages the LLM sees.
+
+        - Planning/escalated: full conversation history (planner needs full context)
+        - Executing: windowed to last N messages (avoids O(n^2) token growth)
+
+        System prompts are injected here since we use prompt=None in create_executor.
+        """
+        messages = state["messages"]
+
+        if self.current_phase != "executing":
+            # Planning: LLM sees everything
+            return {
+                "llm_input_messages": [
+                    SystemMessage(content=self._planner_system_prompt)
+                ] + list(messages)
+            }
+
+        # Execution: window to recent messages only
+        # Always include the first HumanMessage (the execution instruction)
+        first_human = None
+        for msg in messages:
+            if isinstance(msg, HumanMessage):
+                first_human = msg
+                break
+
+        recent = list(messages[-self.executor_context_window:])
+
+        # ToolMessages must follow an AIMessage with tool_calls.
+        # If the window cut leaves orphaned ToolMessages at the start, drop them.
+        while recent and isinstance(recent[0], ToolMessage):
+            recent.pop(0)
+
+        windowed = [SystemMessage(content=self._executor_system_prompt)]
+        if first_human and first_human not in recent:
+            windowed.append(first_human)
+        windowed.extend(recent)
+
+        return {"llm_input_messages": windowed}
+
+    # ── Executor creation ───────────────────────────────────────────────────────
 
     def create_executor(self):
         return create_react_agent(
-            self.model,
-            self.tools,
+            model=self._select_model,
+            tools=self.tools,
             checkpointer=self.memory,
-            prompt=self.prompt
+            pre_model_hook=self._pre_model_hook,
+            # prompt=None: system prompts are handled in _pre_model_hook
         )
+
+    def _detect_phase(self, user_message: str) -> str:
+        """Detect whether this message should use the executor or planner model."""
+        msg_lower = user_message.lower()
+        if any(kw in msg_lower for kw in _EXECUTE_KEYWORDS):
+            return "executing"
+        return "planning"
 
     def handle_user_input(self, user_message: str) -> str:
         """
         Non-streaming approach (returns final string) with debug logging and token tracking.
+        Automatically selects planner vs executor model based on user intent.
         """
+        # Detect phase from user message (unless already escalated)
+        if self.current_phase != "escalated":
+            new_phase = self._detect_phase(user_message)
+            if new_phase != "executing" and self.current_phase == "executing":
+                # if switching out of execution, reset failure counter
+                self.consecutive_exec_failures = 0
+            self.current_phase = new_phase
+
+        phase_model = self.model_configs.get(self.current_phase, {}).get("name", "unknown")
+        self.service_node.get_logger().info(
+            f"Starting agent execution [{self.current_phase} → {phase_model}] for: {user_message[:100]}..."
+        )
+
         agent_executor = self.create_executor()
-        
-        self.service_node.get_logger().info(f"Starting agent execution for: {user_message[:100]}...")
-        
+
         # Track token usage, step details, and timing
         interaction_start = datetime.now()
         total_input_tokens = 0
         total_output_tokens = 0
         step_details = []  # Store detailed step information
-        
+
         try:
             # Stream to see each step
             step_count = 0
@@ -169,14 +281,16 @@ class Agent:
             ):
                 step_count += 1
                 last_message = step["messages"][-1]
-                
-                # Create step log entry
+
+                # Create step log entry with model/phase tracking
                 step_log = {
                     "step": step_count,
                     "type": type(last_message).__name__,
-                    "content": str(last_message.content)[:500] if hasattr(last_message, 'content') else None
+                    "phase": self.current_phase,
+                    "model": self.model_configs.get(self.current_phase, {}).get("name", "unknown"),
+                    "content": str(last_message.content) if hasattr(last_message, 'content') else None
                 }
-                
+
                 # Extract token usage if available
                 if hasattr(last_message, 'usage_metadata') and last_message.usage_metadata:
                     usage = last_message.usage_metadata
@@ -186,13 +300,13 @@ class Agent:
                     else:
                         total_input_tokens += getattr(usage, 'input_tokens', 0)
                         total_output_tokens += getattr(usage, 'output_tokens', 0)
-                
+
                 # Log each step for debugging
                 if hasattr(last_message, 'content'):
                     self.service_node.get_logger().info(
-                        f"Step {step_count}: {type(last_message).__name__} - {str(last_message.content)[:200]}"
+                        f"Step {step_count} [{self.current_phase}]: {type(last_message).__name__} - {str(last_message.content)[:200]}"
                     )
-                
+
                 # Capture tool calls (when agent calls tools)
                 if hasattr(last_message, 'tool_calls') and last_message.tool_calls:
                     tool_calls_log = []
@@ -206,26 +320,34 @@ class Agent:
                             f"  → Tool call: {tool_call_info['name']} with args: {str(tool_call_info['args'])[:200]}"
                         )
                     step_log["tool_calls"] = tool_calls_log
-                
+
                 # Capture tool responses (may be multiple in parallel calls)
-                # Check if there are multiple new ToolMessages since last step
-                from langchain_core.messages import ToolMessage
                 if isinstance(last_message, ToolMessage):
-                    # Count how many new messages are ToolMessages in this step
-                    new_messages = step["messages"][len(step["messages"]) - 1:]
                     tool_responses = []
-                    
+
                     # Go backwards to find all ToolMessages added in this step
                     for msg in reversed(step["messages"]):
                         if isinstance(msg, ToolMessage):
                             tool_responses.insert(0, {
                                 "tool_call_id": getattr(msg, 'tool_call_id', 'unknown'),
-                                "content": str(msg.content)[:500]
+                                "name": getattr(msg, 'name', 'unknown'),
+                                "content": str(msg.content)
                             })
+                            
+                            # Auto-escalation trigger based on continuous execution parsing
+                            if self.current_phase == "executing" and getattr(msg, 'name', 'unknown') in ["execute_single_action", "execute_sequence"]:
+                                try:
+                                    response_data = json.loads(msg.content)
+                                    if response_data.get("success") is False:
+                                        self.consecutive_exec_failures += 1
+                                    else:
+                                        self.consecutive_exec_failures = 0
+                                except json.JSONDecodeError:
+                                    pass
+
                         elif not isinstance(msg, ToolMessage):
-                            # Stop when we hit a non-ToolMessage
                             break
-                    
+
                     if len(tool_responses) > 1:
                         step_log["tool_responses"] = tool_responses
                         self.service_node.get_logger().info(
@@ -235,20 +357,22 @@ class Agent:
                             self.service_node.get_logger().info(
                                 f"     {i}. {resp['content']}"
                             )
-                
+
                 step_details.append(step_log)
-                
+
                 # Check if we're done (AIMessage with no tool calls)
                 if isinstance(last_message, AIMessage) and not getattr(last_message, 'tool_calls', None):
                     interaction_end = datetime.now()
                     execution_time = (interaction_end - interaction_start).total_seconds()
-                    
-                    self.service_node.get_logger().info(f"Agent completed after {step_count} steps")
+
+                    self.service_node.get_logger().info(
+                        f"Agent completed after {step_count} steps [{self.current_phase} → {phase_model}]"
+                    )
                     self.service_node.get_logger().info(
                         f"Token usage - Input: {total_input_tokens}, Output: {total_output_tokens}, Total: {total_input_tokens + total_output_tokens}"
                     )
                     self.service_node.get_logger().info(f"Execution time: {execution_time:.2f} seconds")
-                    
+
                     # Log this interaction with detailed steps and timing
                     self.interaction_log.append({
                         "timestamp": interaction_start.isoformat(),
@@ -256,6 +380,8 @@ class Agent:
                         "execution_time_seconds": execution_time,
                         "user_message": user_message,
                         "agent_response": last_message.content,
+                        "phase": self.current_phase,
+                        "model": phase_model,
                         "steps": step_count,
                         "step_details": step_details,
                         "tokens": {
@@ -264,9 +390,27 @@ class Agent:
                             "total": total_input_tokens + total_output_tokens
                         }
                     })
-                    
-                    return last_message.content
-            
+
+                    response_text = last_message.content
+
+                    # ── Escalation: executor couldn't fix an error ──────────
+                    if self.current_phase == "executing" and ("ESCALATE:" in response_text or self.consecutive_exec_failures >= 3):
+                        self.consecutive_exec_failures = 0  # reset for next time
+                        self.service_node.get_logger().info(
+                            "Executor escalating to planner for complex error diagnosis (implicit or explicit)"
+                        )
+                        self.current_phase = "escalated"
+                        return self.handle_user_input(
+                            f"The execution monitor could not resolve this error and escalated to you.\n"
+                            f"Recent response: {response_text}\n"
+                            f"Please diagnose the root cause using query_assembly_knowledge and fix the sequence. "
+                            f"After fixing, continue execution from the failed action."
+                        )
+
+                    # Reset phase after completion
+                    self.current_phase = "planning"
+                    return response_text
+
             # Fallback: get the last message
             messages = agent_executor.invoke({"messages": [HumanMessage(content=user_message)]}, self.config)
             ai_message = messages["messages"][-1]
@@ -275,14 +419,16 @@ class Agent:
             self.service_node.get_logger().info(
                 f"Token usage - Input: {total_input_tokens}, Output: {total_output_tokens}, Total: {total_input_tokens + total_output_tokens}"
             )
+            self.current_phase = "planning"
             return response
-            
+
         except Exception as e:
             self.service_node.get_logger().error(f"Agent execution error after {step_count} steps: {e}")
             if total_input_tokens > 0 or total_output_tokens > 0:
                 self.service_node.get_logger().info(
                     f"Token usage before error - Input: {total_input_tokens}, Output: {total_output_tokens}, Total: {total_input_tokens + total_output_tokens}"
                 )
+            self.current_phase = "planning"
             raise
 
     
@@ -377,6 +523,7 @@ class Agent:
         # Create log data structure
         log_data = {
             "model": self.model_name,
+            "models": self.model_configs,
             "task_success": task_success,
             "comment": comment,
             "session_start": self.interaction_log[0]["timestamp"] if self.interaction_log else None,
