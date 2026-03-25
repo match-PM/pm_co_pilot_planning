@@ -376,6 +376,7 @@ class PmCoPilotPlanningApp(QMainWindow):
         self.worker.finished.connect(self.thread.quit)  # Ensure worker emits a finished signal when done
         self.worker.finished.connect(self.worker.deleteLater)  # Cleanup worker after finishing
         self.thread.finished.connect(self.thread.deleteLater)  # Cleanup thread after it finishes
+        self.thread.finished.connect(lambda: setattr(self, 'thread', None))
 
         self.worker.finished.connect(self.handleSpeechInput)
 
@@ -445,6 +446,7 @@ class PmCoPilotPlanningApp(QMainWindow):
         self.worker.finished.connect(self.thread.quit)
         self.worker.finished.connect(self.worker.deleteLater)
         self.thread.finished.connect(self.thread.deleteLater)
+        self.thread.finished.connect(lambda: setattr(self, 'thread', None))
 
         # New signal to handle partial chunks
         self.worker.chunk_received.connect(self.handle_partial_chunk)
@@ -477,11 +479,16 @@ class PmCoPilotPlanningApp(QMainWindow):
 
 
     def closeEvent(self, event: QEvent):
-        # Custom actions to perform when the window is closing
+        # Signal the agent to stop its current loop
+        if hasattr(self, 'agent'):
+            self.agent.stop_requested = True
+
+        # Wait for the worker thread to finish before cleanup
+        if hasattr(self, 'thread') and self.thread is not None and self.thread.isRunning():
+            self.thread.quit()
+            self.thread.wait(5000)  # wait up to 5 s
+
         self.cleanup()
-        # if self.thread is not None and self.thread.isRunning():
-        #     self.thread.quit()  # Request the thread to quit
-        #     self.thread.wait()  # Wait for the thread to finish
         event.accept()  # Proceed with the window closing
 
     def on_sequence_modified(self):
@@ -496,9 +503,35 @@ class PmCoPilotPlanningApp(QMainWindow):
             from PyQt6.QtWidgets import QMessageBox, QDialog, QVBoxLayout, QLabel, QTextEdit, QPushButton, QHBoxLayout
             
             # Create custom dialog with comment field
-            dialog = QDialog(self)
+            dialog = QDialog(None)
             dialog.setWindowTitle("Task Completion")
             dialog.setMinimumWidth(400)
+            dialog.setStyle(QStyleFactory.create("Fusion"))
+            dark_palette = dialog.palette()
+            dark_palette.setColor(QPalette.ColorRole.Window, QColor("#1e1e1e"))
+            dark_palette.setColor(QPalette.ColorRole.WindowText, QColor("#ffffff"))
+            dark_palette.setColor(QPalette.ColorRole.Base, QColor("#2e2e2e"))
+            dark_palette.setColor(QPalette.ColorRole.Text, QColor("#ffffff"))
+            dialog.setPalette(dark_palette)
+            dialog.setStyleSheet("""
+                QDialog { background-color: #1e1e1e; }
+                QTextEdit {
+                    border: 1px solid #444;
+                    border-radius: 5px;
+                    padding: 5px;
+                    background-color: #2e2e2e;
+                    color: #ffffff;
+                }
+                QPushButton {
+                    border: 1px solid #444;
+                    border-radius: 5px;
+                    padding: 5px;
+                    background-color: #5e5e5e;
+                    color: #ffffff;
+                }
+                QPushButton:hover { background-color: #3e3e3e; }
+                QLabel { color: #ffffff; }
+            """)
             
             layout = QVBoxLayout()
             

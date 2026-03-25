@@ -73,6 +73,7 @@ class Agent:
         # ── Phase tracking ──────────────────────────────────────────────────────
         self.current_phase = "planning"  # "planning" | "executing" | "escalated"
         self.consecutive_exec_failures = 0  # track execution failures for auto-escalate
+        self.stop_requested = False  # set to True to abort agent loop on app close
 
 
         # ── System prompts (injected via pre_model_hook) ────────────────────────
@@ -280,8 +281,13 @@ class Agent:
                 self.config,
                 stream_mode="values"
             ):
+                if self.stop_requested:
+                    self.service_node.get_logger().info("Agent stopped: app was closed.")
+                    self.current_phase = "planning"
+                    return "Agent stopped: application was closed."
+
                 last_message = step["messages"][-1]
-                
+
                 # Skip duplicate messages (same message appearing in consecutive stream events)
                 if last_logged_message is not None and last_message is last_logged_message:
                     continue

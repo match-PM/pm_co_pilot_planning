@@ -336,7 +336,7 @@ planner:
     Do NOT record things discoverable via existing tools (frame names, service parameters).
 
 executor:
-  model: 'gpt-4.1-mini'
+  model: 'gpt-5-mini'
   model_provider: 'openai'
   temperature: 0.0
   system_prompt: >
@@ -360,7 +360,10 @@ executor:
           - Missing prerequisite → execute the prerequisite action first
           - Wrong frame name → `get_frames_in_scene()` to discover available frames
        d. Retry the failed action.
-       e. If still failing after 2 fix attempts → STOP and respond with EXACTLY:
+       e. If retry SUCCEEDS: call `record_knowledge(service_name=<failed_service>,
+          field="usage_notes", content="<what parameter change or fix resolved the error>",
+          source="experience", confidence=0.7)` to save what you learned. Then continue.
+       f. If still failing after 2 fix attempts → STOP and respond with EXACTLY:
           ESCALATE: {"action_index": <N>, "action_name": "<name>", "service": "<service_path>",
           "error": "<error message>", "attempts": ["<description of fix 1>", "<description of fix 2>"],
           "recommendation": "<your best guess at what needs to change>"}
@@ -373,13 +376,6 @@ executor:
     - Each successful step should be: execute → check result → move on.
     - NEVER parallelize multiple execute calls (robot performs one physical action at a time).
     - Prefer `get_action_at_index` (~50 tokens) over `get_action_list` (~5000+ tokens).
-
-
-    ═══ LEARNING ═══
-
-    If a failure revealed a new constraint or pattern, call `record_knowledge` after fixing:
-    - source: "experience", confidence: 0.7
-    - Add usage_notes for parameter tips or constraints you discovered.
 
 
 
