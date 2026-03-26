@@ -537,14 +537,32 @@ class AssemblyKnowledgeTools:
                 "frames": {
                     "vision_points": frame_categories["vision_points"],
                     "laser_measurement_frames": frame_categories["laser_measurement_frames"],
-                    "glue_points": frame_categories["glue_points"],
+                    "glue_points": [
+                        {
+                            "name": name,
+                            "spawned_properties": {
+                                "has_been_placed": False,
+                                "has_been_cured": False,
+                            },
+                        }
+                        for name in frame_categories["glue_points"]
+                    ],
                     "gripping_point": frame_categories["gripping_point"],
                     "other_frames": frame_categories["other_frames"],
                 },
                 "spawned_frame_names": {
                     "vision_points": prefix(frame_categories["vision_points"]),
                     "laser_measurement_frames": prefix(frame_categories["laser_measurement_frames"]),
-                    "glue_points": prefix(frame_categories["glue_points"]),
+                    "glue_points": [
+                        {
+                            "name": f"{component_name}_{name}",
+                            "spawned_properties": {
+                                "has_been_placed": False,
+                                "has_been_cured": False,
+                            },
+                        }
+                        for name in frame_categories["glue_points"]
+                    ],
                     "gripping_point": prefix(frame_categories["gripping_point"]),
                 },
                 "roles": {

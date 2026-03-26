@@ -890,30 +890,19 @@ class RsapTools:
         except Exception as e:
             return json.dumps({"success": False, "error": str(e)})
 
+
     def _execute_sequence_structured(self, start_index: int = 0) -> str:
-        """Execute the action sequence (StructuredTool version)."""
-        return self._execute_sequence_impl(start_index)
-
-    def _execute_sequence(self, input_str: str = "{}") -> str:
-        """Execute the action sequence (legacy single-input version)."""
-        try:
-            params = json.loads(input_str) if input_str and input_str != "{}" else {}
-            start_index = params.get("start_index", 0)
-            return self._execute_sequence_impl(start_index)
-        except json.JSONDecodeError as e:
-            return json.dumps({"success": False, "error": f"Invalid JSON input: {str(e)}"})
-        except Exception as e:
-            return json.dumps({"success": False, "error": str(e)})
-
-    def _execute_sequence_impl(self, start_index: int = 0) -> str:
         """Core implementation for execute_sequence."""
         try:
-            success, final_index = self.rsap.execute_action_list(start_index)
-            
+            # Convert from 1-based (GUI) to 0-based (internal), but only if non-zero
+            internal_start = max(0, start_index - 1) if start_index > 0 else 0
+
+            success, final_index = self.rsap.execute_action_list(internal_start)
+
             result = {
                 "success": success,
                 "start_index": start_index,
-                "final_index": final_index,
+                "final_index": final_index + 1 if final_index is not None else None,
                 "message": "Sequence executed successfully" if success else f"Sequence execution failed at index {final_index + 1}"
             }
 

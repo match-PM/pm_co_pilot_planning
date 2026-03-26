@@ -131,7 +131,7 @@ class Agent:
             tools_instance.move_action_tool,
 
             # ── Execution ─────────────────────────────────────────────────────────
-            tools_instance.execute_sequence_tool,
+            # tools_instance.execute_sequence_tool,  # currently not used, because the agent learns step by step
             tools_instance.execute_single_action_tool,
 
             # ── Sequence persistence ──────────────────────────────────────────────
@@ -148,7 +148,7 @@ class Agent:
         # the scene summary is injected automatically via pre_model_hook.
         self.executor_tools = [
             tools_instance.execute_single_action_tool,
-            tools_instance.execute_sequence_tool,
+            # tools_instance.execute_sequence_tool,  # currently not used, because the agent learns step by step
             tools_instance.get_action_at_index_tool,
             tools_instance.get_action_parameters_tool,
             tools_instance.set_action_parameters_tool,
