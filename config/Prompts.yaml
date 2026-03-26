@@ -179,7 +179,15 @@ agent:
 
     You can add to any field:
     - preconditions/postconditions: new fact tokens you discovered
+    - parameters: call `get_service_parameters` first, then record each parameter as
+      record_knowledge(field="parameters", content='{"name":"<p>","type":"<t>","description":"<d>"}')
     - usage_notes: parameter tips, constraints, lessons from errors or patterns
+
+    **Proactively fill empty fields**: When you use a service whose knowledge entry has
+    empty preconditions, postconditions, or parameters, fill them in:
+    - parameters is {}: call `get_service_parameters` and record every parameter
+    - preconditions is []: infer what must be true before the service succeeds and record them
+    - postconditions is []: infer what state changes after a successful call and record them
 
     For knowledge that spans multiple services, omit service_name to save to general_knowledge.
     Do NOT record things discoverable via existing tools (frame names, service parameters).
@@ -360,7 +368,15 @@ planner:
 
     You can add to any field:
     - preconditions/postconditions: new fact tokens you discovered
+    - parameters: call `get_service_parameters` first, then record each parameter as
+      record_knowledge(field="parameters", content='{"name":"<p>","type":"<t>","description":"<d>"}')
     - usage_notes: parameter tips, constraints, lessons from errors or patterns
+
+    **Proactively fill empty fields**: When you use a service whose knowledge entry has
+    empty preconditions, postconditions, or parameters, fill them in:
+    - parameters is {}: call `get_service_parameters` and record every parameter
+    - preconditions is []: infer what must be true before the service succeeds and record them
+    - postconditions is []: infer what state changes after a successful call and record them
 
     For knowledge that spans multiple services, omit service_name to save to general_knowledge.
     Do NOT record things discoverable via existing tools (frame names, service parameters).
@@ -397,10 +413,17 @@ executor:
           - Wrong parameter → `get_action_parameters(index)` then `set_action_parameters(index, ...)`
           - Missing prerequisite → execute the prerequisite action first
           - Wrong frame name → `get_frames_in_scene()` to discover available frames
+          - Missing action → call 'get_available_services' then `add_service_to_sequence` to insert the required service, then set parameters
        d. Retry the failed action.
-       e. If retry SUCCEEDS: call `record_knowledge(service_name=<failed_service>,
-          field="usage_notes", content="<what parameter change or fix resolved the error>",
-          source="experience", confidence=0.7)` to save what you learned. Then continue.
+       e. If retry SUCCEEDS:
+          - Save what fixed the error: record_knowledge(service_name=<failed_service>,
+            field="usage_notes", content="<what parameter change or fix resolved the error>",
+            source="experience", confidence=0.7)
+          - If the service has empty preconditions, postconditions, or parameters, fill them in now:
+            record_knowledge(field="preconditions"/"postconditions", content="<fact token>") for
+            each inferred condition; for parameters call `get_service_parameters` first and record
+            each as record_knowledge(field="parameters", content='{"name":"<p>","type":"<t>","description":"<d>"}').
+          Then continue.
        f. If still failing after 2 fix attempts → STOP and respond with EXACTLY:
           ESCALATE: {"action_index": <N>, "action_name": "<name>", "service": "<service_path>",
           "error": "<error message>", "attempts": ["<description of fix 1>", "<description of fix 2>"],

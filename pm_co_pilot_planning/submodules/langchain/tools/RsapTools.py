@@ -31,6 +31,11 @@ class GetSequenceSummaryInput(BaseModel):
     pass
 
 
+class ExecuteSequenceInput(BaseModel):
+    """Input schema for execute_sequence tool."""
+    start_index: Optional[int] = Field(default=0, description="0-based index to start execution from (default 0 = beginning)")
+
+
 class AddServiceToSequenceInput(BaseModel):
     """Input schema for add_service_to_sequence tool."""
     service_client: str = Field(description="The ROS2 service client name (e.g., '/move_robot')")
@@ -204,13 +209,12 @@ class RsapTools:
             args_schema=MoveActionInput
         )
 
-        self.execute_sequence_tool = Tool(
+        self.execute_sequence_tool = StructuredTool.from_function(
+            func=self._execute_sequence_structured,
             name="execute_sequence",
-            func=self._execute_sequence,
             description="""Execute the complete action sequence starting from a specific index (default 0).
-            Input should be a JSON string with optional key: 'start_index' (default 0).
-            Example: {"start_index": 0} or just "{}" to start from beginning.
-            Returns execution log as JSON."""
+            Returns execution log as JSON.""",
+            args_schema=ExecuteSequenceInput
         )
 
         self.execute_single_action_tool = Tool(
@@ -886,12 +890,24 @@ class RsapTools:
         except Exception as e:
             return json.dumps({"success": False, "error": str(e)})
 
+    def _execute_sequence_structured(self, start_index: int = 0) -> str:
+        """Execute the action sequence (StructuredTool version)."""
+        return self._execute_sequence_impl(start_index)
+
     def _execute_sequence(self, input_str: str = "{}") -> str:
-        """Execute the action sequence."""
+        """Execute the action sequence (legacy single-input version)."""
         try:
             params = json.loads(input_str) if input_str and input_str != "{}" else {}
             start_index = params.get("start_index", 0)
+            return self._execute_sequence_impl(start_index)
+        except json.JSONDecodeError as e:
+            return json.dumps({"success": False, "error": f"Invalid JSON input: {str(e)}"})
+        except Exception as e:
+            return json.dumps({"success": False, "error": str(e)})
 
+    def _execute_sequence_impl(self, start_index: int = 0) -> str:
+        """Core implementation for execute_sequence."""
+        try:
             success, final_index = self.rsap.execute_action_list(start_index)
             
             result = {
@@ -922,8 +938,6 @@ class RsapTools:
 
             return json.dumps(result)
 
-        except json.JSONDecodeError as e:
-            return json.dumps({"success": False, "error": f"Invalid JSON input: {str(e)}"})
         except Exception as e:
             return json.dumps({"success": False, "error": str(e)})
 

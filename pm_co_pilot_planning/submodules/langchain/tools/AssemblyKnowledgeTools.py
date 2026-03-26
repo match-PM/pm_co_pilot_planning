@@ -283,7 +283,7 @@ class AssemblyKnowledgeTools:
             description=(
                 "Read an assembly description JSON file and return its component list "
                 "and a summary of assembly constraints. "
-                "Input: absolute file path OR just the assembly name (e.g. 'Baugruppe_S17')."
+                "Input: absolute file path OR just the assembly name."
             ),
             args_schema=GetAssemblyDescriptionInput,
         )

@@ -155,11 +155,16 @@ class Agent:
             tools_instance.get_sequence_summary_tool,
             tools_instance.get_available_services_tool,
             tools_instance.get_service_parameters_tool,
+            tools_instance.add_service_to_sequence_tool,
             knowledge_tools.query_assembly_knowledge_tool,
             knowledge_tools.record_knowledge_tool,
             assembly_knowledge.get_object_frames_tool,
             assembly_knowledge.get_frame_properties_tool,
             assembly_knowledge.get_frames_in_scene_tool,
+            assembly_knowledge.list_available_components_tool,
+            assembly_knowledge.get_component_description_tool,
+            assembly_knowledge.list_available_assemblies_tool,
+            assembly_knowledge.get_assembly_description_tool,
         ]
 
         # ── Bind tools to each model ───────────────────────────────────────────
@@ -307,6 +312,8 @@ class Agent:
                         }
                     })
                     self.current_phase = "planning"
+                    # Save immediately — cleanup() may have already run by the time we get here
+                    self.save_interaction_log()
                     return "Agent stopped: application was closed."
 
                 last_message = step["messages"][-1]
@@ -340,7 +347,7 @@ class Agent:
                 # Log each step for debugging
                 if hasattr(last_message, 'content'):
                     self.service_node.get_logger().info(
-                        f"Step {step_count} [{self.current_phase}]: {type(last_message).__name__} - {str(last_message.content)[:200]}"
+                        f"Step {step_count} [{self.current_phase}]: {type(last_message).__name__} - {str(last_message.content)}"
                     )
 
                 # Capture tool calls (when agent calls tools)
@@ -353,7 +360,7 @@ class Agent:
                         }
                         tool_calls_log.append(tool_call_info)
                         self.service_node.get_logger().info(
-                            f"  → Tool call: {tool_call_info['name']} with args: {str(tool_call_info['args'])[:200]}"
+                            f"  → Tool call: {tool_call_info['name']} with args: {str(tool_call_info['args'])}"
                         )
                     step_log["tool_calls"] = tool_calls_log
 
@@ -454,10 +461,12 @@ class Agent:
                         try:
                             self.handle_user_input(
                                 "Execution completed successfully. "
-                                "If you observed new service behavior during execution — "
-                                "such as preconditions, postconditions, or parameter constraints "
-                                "not yet in the knowledge base — record them now using record_knowledge. "
-                                "If nothing new was discovered, respond with 'No new knowledge to record.'"
+                                "For each service used that has empty preconditions, postconditions, or parameters "
+                                "in the knowledge base, fill them in now using record_knowledge: "
+                                "for parameters call get_service_parameters first, then record each parameter; "
+                                "for preconditions/postconditions infer the fact tokens from observed behavior. "
+                                "Also record any other new discoveries (constraints, lessons learned). "
+                                "If nothing is missing or new, respond with 'No new knowledge to record.'"
                             )
                         except Exception as learn_err:
                             self.service_node.get_logger().warning(

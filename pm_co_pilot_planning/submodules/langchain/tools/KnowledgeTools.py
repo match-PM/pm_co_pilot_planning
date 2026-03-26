@@ -9,6 +9,7 @@ Provides three tools:
 
 import json
 import os
+import threading
 import yaml
 from datetime import date
 from typing import Optional, List, Dict, Any
@@ -57,7 +58,9 @@ class RecordKnowledgeInput(BaseModel):
     field: str = Field(
         description=(
             "Which field to add to: 'preconditions', 'postconditions', "
-            "or 'usage_notes'. For general_knowledge, use 'usage_notes'."
+            "'usage_notes', or 'parameters'. For general_knowledge, use 'usage_notes'. "
+            "For 'parameters': content must be a JSON string with keys 'name', 'type', "
+            "and 'description' (e.g. '{\"name\": \"target_frame\", \"type\": \"string\", \"description\": \"Frame to align to\"}')."
         ),
     )
     content: str = Field(
@@ -136,6 +139,7 @@ class KnowledgeTools:
 
     def __init__(self, service_node: Node):
         self.service_node = service_node
+        self._write_lock = threading.Lock()
         self.service_node.get_logger().info("Initializing KnowledgeTools...")
 
         try:
@@ -199,6 +203,8 @@ class KnowledgeTools:
                 "Fields you can add to:\n"
                 "  - 'preconditions': add a new fact token that must be true before calling this service\n"
                 "  - 'postconditions': add a new fact token that becomes true after calling this service\n"
+                "  - 'parameters': add or update one parameter entry; content must be a JSON string: "
+                "{\"name\": \"<param_name>\", \"type\": \"<type>\", \"description\": \"<what it does>\"}\n"
                 "  - 'usage_notes': add a usage tip, constraint, or learned lesson for this service\n\n"
                 "Call this when:\n"
                 "  - The user corrects your approach (source='user_correction', confidence=0.9)\n"
@@ -371,7 +377,7 @@ class KnowledgeTools:
                 })
 
             # Validate field
-            valid_fields = ("preconditions", "postconditions", "usage_notes")
+            valid_fields = ("preconditions", "postconditions", "usage_notes", "parameters")
             if service_name and field not in valid_fields:
                 return json.dumps({
                     "success": False,
@@ -381,107 +387,136 @@ class KnowledgeTools:
             # Clamp confidence
             confidence = max(0.0, min(1.0, confidence))
 
-            data = _load_knowledge(self._knowledge_path)
+            with self._write_lock:
+                data = _load_knowledge(self._knowledge_path)
 
-            if service_name:
-                # Record to a specific service
-                services = data.setdefault("services", {})
+                if service_name:
+                    # Record to a specific service
+                    services = data.setdefault("services", {})
 
-                if service_name not in services:
-                    # Create a new service entry
-                    services[service_name] = {
-                        "description": "",
-                        "preconditions": [],
-                        "postconditions": [],
-                        "parameters": {},
-                        "usage_notes": [],
-                    }
+                    if service_name not in services:
+                        # Create a new service entry
+                        services[service_name] = {
+                            "description": "",
+                            "preconditions": [],
+                            "postconditions": [],
+                            "parameters": {},
+                            "usage_notes": [],
+                        }
 
-                entry = services[service_name]
+                    entry = services[service_name]
 
-                if field in ("preconditions", "postconditions"):
-                    # Add fact token directly; acknowledge if already known (not an error)
-                    target_list = entry.setdefault(field, [])
-                    if content in target_list:
-                        return json.dumps({
-                            "success": True,
-                            "status": "already_known",
-                            "message": f"'{content}' already exists in {field} for {service_name}.",
-                        })
-                    target_list.append(content)
-                    result_msg = f"Added '{content}' to {field} of {service_name}."
-
-                else:
-                    # Add usage_notes entry with metadata, or reinforce if duplicate
-                    target_list = entry.setdefault("usage_notes", [])
-
-                    # Check for duplicate note text → reinforce confidence instead of rejecting
-                    for existing in target_list:
-                        if isinstance(existing, dict) and existing.get("note") == content:
-                            old_conf = existing.get("confidence", 0.7)
-                            new_conf = min(1.0, round(old_conf + 0.1, 2))
-                            existing["confidence"] = new_conf
-                            existing["confirmation_count"] = existing.get("confirmation_count", 1) + 1
-                            _save_knowledge(self._knowledge_path, data)
+                    if field in ("preconditions", "postconditions"):
+                        # Add fact token directly; acknowledge if already known (not an error)
+                        target_list = entry.setdefault(field, [])
+                        if content in target_list:
                             return json.dumps({
                                 "success": True,
-                                "status": "reinforced",
-                                "id": existing.get("id"),
-                                "message": f"Reinforced existing note (confidence {old_conf} → {new_conf}).",
+                                "status": "already_known",
+                                "message": f"'{content}' already exists in {field} for {service_name}.",
                             })
+                        target_list.append(content)
+                        result_msg = f"Added '{content}' to {field} of {service_name}."
 
+                    elif field == "parameters":
+                        # Parse JSON: {"name": "...", "type": "...", "description": "..."}
+                        try:
+                            param_data = json.loads(content)
+                        except json.JSONDecodeError as exc:
+                            return json.dumps({
+                                "success": False,
+                                "error": (
+                                    f"content must be valid JSON for field='parameters'. "
+                                    f"Expected: {{\"name\": \"...\", \"type\": \"...\", \"description\": \"...\"}}. "
+                                    f"Parse error: {exc}"
+                                ),
+                            })
+                        param_name = param_data.get("name", "").strip()
+                        param_type = param_data.get("type", "").strip()
+                        param_desc = param_data.get("description", "").strip()
+                        if not param_name:
+                            return json.dumps({
+                                "success": False,
+                                "error": "content JSON must include a non-empty 'name' key.",
+                            })
+                        params_dict = entry.setdefault("parameters", {})
+                        params_dict[param_name] = {
+                            "type": param_type or "unknown",
+                            "description": param_desc,
+                        }
+                        result_msg = f"Added/updated parameter '{param_name}' in {service_name}."
+
+                    else:
+                        # Add usage_notes entry with metadata, or reinforce if duplicate
+                        target_list = entry.setdefault("usage_notes", [])
+
+                        # Check for duplicate note text → reinforce confidence instead of rejecting
+                        for existing in target_list:
+                            if isinstance(existing, dict) and existing.get("note") == content:
+                                old_conf = existing.get("confidence", 0.7)
+                                new_conf = min(1.0, round(old_conf + 0.1, 2))
+                                existing["confidence"] = new_conf
+                                existing["confirmation_count"] = existing.get("confirmation_count", 1) + 1
+                                _save_knowledge(self._knowledge_path, data)
+                                return json.dumps({
+                                    "success": True,
+                                    "status": "reinforced",
+                                    "id": existing.get("id"),
+                                    "message": f"Reinforced existing note (confidence {old_conf} → {new_conf}).",
+                                })
+
+                        # Generate ID
+                        existing_ids = [n.get("id", "") for n in target_list if isinstance(n, dict)]
+                        max_num = 0
+                        for eid in existing_ids:
+                            parts = eid.rsplit("_", 1)
+                            if len(parts) == 2:
+                                try:
+                                    max_num = max(max_num, int(parts[1]))
+                                except ValueError:
+                                    pass
+                        # Use a short service suffix for ID readability
+                        svc_short = service_name.rsplit("/", 1)[-1] if service_name else "gen"
+                        new_id = f"usage_{svc_short}_{max_num + 1:03d}"
+
+                        new_entry = {
+                            "id": new_id,
+                            "note": content,
+                            "confidence": confidence,
+                            "source": source,
+                            "created": date.today().isoformat(),
+                            "confirmation_count": 1,
+                        }
+                        target_list.append(new_entry)
+                        result_msg = f"Added usage note '{new_id}' to {service_name}."
+
+                else:
+                    # Record to general_knowledge
+                    general = data.setdefault("general_knowledge", [])
                     # Generate ID
-                    existing_ids = [n.get("id", "") for n in target_list if isinstance(n, dict)]
+                    existing_ids = [g.get("id", "") for g in general if isinstance(g, dict)]
                     max_num = 0
-                    for eid in existing_ids:
-                        parts = eid.rsplit("_", 1)
+                    for gid in existing_ids:
+                        parts = gid.rsplit("_", 1)
                         if len(parts) == 2:
                             try:
                                 max_num = max(max_num, int(parts[1]))
                             except ValueError:
                                 pass
-                    # Use a short service suffix for ID readability
-                    svc_short = service_name.rsplit("/", 1)[-1] if service_name else "gen"
-                    new_id = f"usage_{svc_short}_{max_num + 1:03d}"
+                    new_id = f"general_{max_num + 1:03d}"
 
                     new_entry = {
                         "id": new_id,
-                        "note": content,
+                        "category": category or "uncategorized",
+                        "rule": content,
                         "confidence": confidence,
                         "source": source,
                         "created": date.today().isoformat(),
-                        "confirmation_count": 1,
                     }
-                    target_list.append(new_entry)
-                    result_msg = f"Added usage note '{new_id}' to {service_name}."
+                    general.append(new_entry)
+                    result_msg = f"Added general knowledge entry '{new_id}'."
 
-            else:
-                # Record to general_knowledge
-                general = data.setdefault("general_knowledge", [])
-                # Generate ID
-                existing_ids = [g.get("id", "") for g in general if isinstance(g, dict)]
-                max_num = 0
-                for gid in existing_ids:
-                    parts = gid.rsplit("_", 1)
-                    if len(parts) == 2:
-                        try:
-                            max_num = max(max_num, int(parts[1]))
-                        except ValueError:
-                            pass
-                new_id = f"general_{max_num + 1:03d}"
-
-                new_entry = {
-                    "id": new_id,
-                    "category": category or "uncategorized",
-                    "rule": content,
-                    "confidence": confidence,
-                    "source": source,
-                    "created": date.today().isoformat(),
-                }
-                general.append(new_entry)
-                result_msg = f"Added general knowledge entry '{new_id}'."
-
-            _save_knowledge(self._knowledge_path, data)
+                _save_knowledge(self._knowledge_path, data)
 
             self.service_node.get_logger().info(f"KnowledgeTools: {result_msg}")
 
