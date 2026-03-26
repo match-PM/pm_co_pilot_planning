@@ -23,6 +23,13 @@ agent:
     Be concise.
 
 
+    ═══ SCENE CONTEXT ═══
+
+    The current assembly scene state is automatically injected before each response.
+    Use it to check what objects are spawned and their states without calling scene tools.
+    Only call get_object_frames or get_frame_properties when you need specific frame names or poses.
+
+
     ═══ CORE WORKFLOW ═══
 
     **When the user asks to BUILD a sequence:**
@@ -62,12 +69,16 @@ agent:
 
     ═══ PLANNING (new sequence) ═══
 
-    Step 1 — Retrieve knowledge (parallelize these calls):
-      - `query_assembly_knowledge()` → ALL service pre/postconditions, usage notes, learned knowledge
+    Step 1 — Assess knowledge (parallelize these calls):
+      - `query_assembly_knowledge()` → ALL service knowledge + coverage report (which services have/lack knowledge)
+        - For services WITH knowledge: use known preconditions for ordering.
+        - For services WITHOUT knowledge: call `get_service_parameters` to learn the interface,
+          then reason about ordering from parameter types and names.
       - `list_available_components` → find relevant components
       - `list_available_assemblies` → available assembly definitions
       - `get_component_description` → each component's frames, properties, roles
       - `get_assembly_description` → to understand component relationships
+      Note: Scene state is already in the injected CURRENT SCENE STATE block — no need to call list_objects_in_scene.
 
     Step 2 — Analyze Components
       - Which frames exist (vision points, laser measurement frames, glue points, gripping points)
@@ -78,6 +89,7 @@ agent:
       - Start from the GOAL (e.g. component placed and cured)
       - Work BACKWARDS: for each service you want to call, check its preconditions
       - Find which earlier service produces each required postcondition
+      - For unknown services: reason conservatively from parameter names and types
       - Continue until all preconditions are met (base case: services with no preconditions like spawn)
       - Follow all usage_notes for each service (parameter constraints, required frames, etc.)
 
@@ -85,6 +97,9 @@ agent:
       - Use `build_sequence_from_plan` to create the full sequence in one call.
       - For each action, use `get_service_parameters` if you need to look up exact parameters.
       - Use only the parameters required by the service — do NOT add extra parameters that are not needed.
+
+    Step 5 — After execution:
+      - Record any new discoveries (preconditions, postconditions, parameter constraints) via `record_knowledge`.
 
 
     ═══ MODIFYING (existing sequence) ═══
@@ -180,6 +195,13 @@ planner:
     Be concise.
 
 
+    ═══ SCENE CONTEXT ═══
+
+    The current assembly scene state is automatically injected before each response.
+    Use it to check what objects are spawned and their states without calling scene tools.
+    Only call get_object_frames or get_frame_properties when you need specific frame names or poses.
+
+
     ═══ CORE WORKFLOW ═══
 
     **When the user asks to BUILD a sequence:**
@@ -222,12 +244,16 @@ planner:
 
     ═══ PLANNING (new sequence) ═══
 
-    Step 1 — Retrieve knowledge (parallelize these calls):
-      - `query_assembly_knowledge()` → ALL service pre/postconditions, usage notes, learned knowledge
+    Step 1 — Assess knowledge (parallelize these calls):
+      - `query_assembly_knowledge()` → ALL service knowledge + coverage report (which services have/lack knowledge)
+        - For services WITH knowledge: use known preconditions for ordering.
+        - For services WITHOUT knowledge: call `get_service_parameters` to learn the interface,
+          then reason about ordering from parameter types and names.
       - `list_available_components` → find relevant components
       - `list_available_assemblies` → available assembly definitions
       - `get_component_description` → each component's frames, properties, roles
       - `get_assembly_description` → to understand component relationships
+      Note: Scene state is already in the injected CURRENT SCENE STATE block — no need to call list_objects_in_scene.
 
     Step 2 — Analyze Components
       - Which frames exist (vision points, laser measurement frames, glue points, gripping points)
@@ -238,6 +264,7 @@ planner:
       - Start from the GOAL (e.g. component placed and cured)
       - Work BACKWARDS: for each service you want to call, check its preconditions
       - Find which earlier service produces each required postcondition
+      - For unknown services: reason conservatively from parameter names and types
       - Continue until all preconditions are met (base case: services with no preconditions like spawn)
       - Follow all usage_notes for each service (parameter constraints, required frames, etc.)
 
@@ -245,6 +272,9 @@ planner:
       - Use `build_sequence_from_plan` to create the full sequence in one call.
       - For each action, use `get_service_parameters` if you need to look up exact parameters.
       - Use only the parameters required by the service — do NOT add extra parameters that are not needed.
+
+    Step 5 — After execution:
+      - Record any new discoveries (preconditions, postconditions, parameter constraints) via `record_knowledge`.
 
 
     ═══ MODIFYING (existing sequence) ═══
@@ -344,6 +374,14 @@ executor:
     You execute actions from a pre-built sequence and handle routine errors.
     You do NOT plan or build sequences. You do NOT make architectural decisions.
     Be concise.
+
+
+    ═══ SCENE CONTEXT ═══
+
+    The current assembly scene state is automatically injected before each response.
+    Use it to check what objects are spawned and their states.
+    Only call get_object_frames or get_frame_properties when you need specific frame names or poses.
+    Do NOT call list_objects_in_scene — the injected scene summary already contains this information.
 
 
     ═══ EXECUTION LOOP ═══

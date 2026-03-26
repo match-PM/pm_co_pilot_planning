@@ -364,6 +364,95 @@ class AssemblyKnowledgeTools:
             )
 
     # ------------------------------------------------------------------
+    # Scene summary (used by pre_model_hook and state-diff)
+    # ------------------------------------------------------------------
+
+    def get_compact_scene_summary(self) -> str:
+        """Return a compact (<300 token) scene state string for LLM context injection.
+
+        Format:
+          CURRENT SCENE STATE:
+          Objects: ObjA (parent: gonio_right, gripped: no, assembled: no), ...
+          Frame summary: ObjA [2 vision, 1 laser, 1 grip], ...
+        """
+        try:
+            self._ensure_scene_updated()
+            if self._current_scene is None:
+                return "CURRENT SCENE STATE: No scene data available."
+
+            objects = self._current_scene.objects_in_scene
+            if not objects:
+                return "CURRENT SCENE STATE: Scene is empty (no objects spawned)."
+
+            obj_parts = []
+            frame_parts = []
+
+            for obj in objects:
+                props = obj.properties
+                gripped = "yes" if props.is_gripped else "no"
+                assembled = "yes" if props.is_assembled else "no"
+                obj_parts.append(
+                    f"{obj.obj_name} (parent: {obj.parent_frame}, gripped: {gripped}, assembled: {assembled})"
+                )
+
+                n_vision = sum(
+                    1 for fr in obj.ref_frames
+                    if fr.properties.vision_frame_properties.is_vision_frame
+                )
+                n_laser = sum(
+                    1 for fr in obj.ref_frames
+                    if fr.properties.laser_frame_properties.is_laser_frame
+                )
+                n_glue = sum(
+                    1 for fr in obj.ref_frames
+                    if fr.properties.glue_pt_frame_properties.is_glue_point
+                )
+                n_grip = sum(
+                    1 for fr in obj.ref_frames
+                    if fr.properties.gripping_frame_properties.is_gripping_frame
+                )
+
+                counts = []
+                if n_vision:
+                    counts.append(f"{n_vision} vision")
+                if n_laser:
+                    counts.append(f"{n_laser} laser")
+                if n_grip:
+                    counts.append(f"{n_grip} grip")
+                if n_glue:
+                    counts.append(f"{n_glue} glue")
+                frame_parts.append(
+                    f"{obj.obj_name} [{', '.join(counts) if counts else 'no typed frames'}]"
+                )
+
+            lines = [
+                "CURRENT SCENE STATE:",
+                f"Objects: {', '.join(obj_parts)}",
+                f"Frame summary: {', '.join(frame_parts)}",
+            ]
+            return "\n".join(lines)
+
+        except Exception as e:
+            return f"CURRENT SCENE STATE: Error getting scene summary: {e}"
+
+    def _get_scene_snapshot(self) -> dict:
+        """Return a lightweight snapshot of current scene object states for state-diff.
+
+        Returns dict of {obj_name: {parent_frame, is_gripped, is_assembled}}.
+        Does NOT call _ensure_scene_updated (caller is responsible).
+        """
+        if self._current_scene is None:
+            return {}
+        snapshot = {}
+        for obj in self._current_scene.objects_in_scene:
+            snapshot[obj.obj_name] = {
+                "parent_frame": obj.parent_frame,
+                "is_gripped": obj.properties.is_gripped,
+                "is_assembled": obj.properties.is_assembled,
+            }
+        return snapshot
+
+    # ------------------------------------------------------------------
     # Internal implementations
     # ------------------------------------------------------------------
 

@@ -42,15 +42,18 @@ class Agent:
 
     def __init__(self, service_node: Node, thread_id: str, rsap_instance=None):
 
-        # Use provided RSAP instance or create RsapTools with service_node
+        # Create AssemblyKnowledgeTools first so it can be passed to RsapTools for state-diff
         if rsap_instance:
-            tools_instance = RsapTools(service_node, rsap_instance=rsap_instance)
             assembly_knowledge = AssemblyKnowledgeTools(service_node, rsap_instance=rsap_instance)
+            tools_instance = RsapTools(service_node, rsap_instance=rsap_instance, assembly_knowledge=assembly_knowledge)
             self.rsap_instance = rsap_instance
         else:
-            tools_instance = RsapTools(service_node)
             assembly_knowledge = AssemblyKnowledgeTools(service_node)
+            tools_instance = RsapTools(service_node, assembly_knowledge=assembly_knowledge)
             self.rsap_instance = None
+
+        # Store reference for scene injection in pre_model_hook
+        self._assembly_knowledge = assembly_knowledge
 
         knowledge_tools = KnowledgeTools(service_node)
 
@@ -141,6 +144,8 @@ class Agent:
         ]
 
         # ── Minimal tool subset for executor ────────────────────────────────────
+        # Note: list_objects_in_scene and get_object_properties are removed because
+        # the scene summary is injected automatically via pre_model_hook.
         self.executor_tools = [
             tools_instance.execute_single_action_tool,
             tools_instance.execute_sequence_tool,
@@ -152,8 +157,6 @@ class Agent:
             tools_instance.get_service_parameters_tool,
             knowledge_tools.query_assembly_knowledge_tool,
             knowledge_tools.record_knowledge_tool,
-            assembly_knowledge.list_objects_in_scene_tool,
-            assembly_knowledge.get_object_properties_tool,
             assembly_knowledge.get_object_frames_tool,
             assembly_knowledge.get_frame_properties_tool,
             assembly_knowledge.get_frames_in_scene_tool,
@@ -195,14 +198,17 @@ class Agent:
         - Executing: windowed to last N messages (avoids O(n^2) token growth)
 
         System prompts are injected here since we use prompt=None in create_executor.
+        Scene state is injected as a SystemMessage after the system prompt.
         """
         messages = state["messages"]
+        scene_msg = SystemMessage(content=self._assembly_knowledge.get_compact_scene_summary())
 
         if self.current_phase != "executing":
             # Planning: LLM sees everything
             return {
                 "llm_input_messages": [
-                    SystemMessage(content=self._planner_system_prompt)
+                    SystemMessage(content=self._planner_system_prompt),
+                    scene_msg,
                 ] + list(messages)
             }
 
@@ -221,7 +227,7 @@ class Agent:
         while recent and isinstance(recent[0], ToolMessage):
             recent.pop(0)
 
-        windowed = [SystemMessage(content=self._executor_system_prompt)]
+        windowed = [SystemMessage(content=self._executor_system_prompt), scene_msg]
         if first_human and first_human not in recent:
             windowed.append(first_human)
         windowed.extend(recent)
@@ -283,6 +289,23 @@ class Agent:
             ):
                 if self.stop_requested:
                     self.service_node.get_logger().info("Agent stopped: app was closed.")
+                    interaction_end = datetime.now()
+                    self.interaction_log.append({
+                        "timestamp": interaction_start.isoformat(),
+                        "timestamp_end": interaction_end.isoformat(),
+                        "execution_time_seconds": (interaction_end - interaction_start).total_seconds(),
+                        "user_message": user_message,
+                        "agent_response": "[interrupted: app closed]",
+                        "phase": self.current_phase,
+                        "model": phase_model,
+                        "steps": step_count,
+                        "step_details": step_details,
+                        "tokens": {
+                            "input": total_input_tokens,
+                            "output": total_output_tokens,
+                            "total": total_input_tokens + total_output_tokens
+                        }
+                    })
                     self.current_phase = "planning"
                     return "Agent stopped: application was closed."
 
@@ -420,8 +443,27 @@ class Agent:
                             f"After fixing, continue execution from the failed action."
                         )
 
-                    # Reset phase after completion
+                    # ── Post-execution learning nudge ───────────────────────
+                    completed_phase = self.current_phase
                     self.current_phase = "planning"
+
+                    if completed_phase == "executing":
+                        self.service_node.get_logger().info(
+                            "Post-execution learning nudge: asking agent to record discovered knowledge."
+                        )
+                        try:
+                            self.handle_user_input(
+                                "Execution completed successfully. "
+                                "If you observed new service behavior during execution — "
+                                "such as preconditions, postconditions, or parameter constraints "
+                                "not yet in the knowledge base — record them now using record_knowledge. "
+                                "If nothing new was discovered, respond with 'No new knowledge to record.'"
+                            )
+                        except Exception as learn_err:
+                            self.service_node.get_logger().warning(
+                                f"Post-execution learning call failed (non-critical): {learn_err}"
+                            )
+
                     return response_text
 
             # Fallback: get the last message

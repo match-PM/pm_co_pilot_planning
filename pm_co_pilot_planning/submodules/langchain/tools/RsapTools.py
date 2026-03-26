@@ -99,14 +99,17 @@ class RsapTools:
     The Tools class provides a set of tools that can be used by the agent.
     Each tool is a function that performs a specific action to control the RosSequentialActionProgrammer.
     """
-    def __init__(self, service_node: Node, rsap_instance=None):
+    def __init__(self, service_node: Node, rsap_instance=None, assembly_knowledge=None):
         self.service_node = service_node
         # Use provided RSAP instance or create a new one
         if rsap_instance:
             self.rsap = rsap_instance
         else:
             self.rsap = RosSequentialActionProgrammer(service_node)
-        
+
+        # Optional reference to AssemblyKnowledgeTools for state-diff on execution
+        self._assembly_knowledge = assembly_knowledge
+
         # Add lock for sequence modification operations
         self._sequence_lock = threading.Lock()
 
@@ -924,12 +927,31 @@ class RsapTools:
         except Exception as e:
             return json.dumps({"success": False, "error": str(e)})
 
+    @staticmethod
+    def _compute_state_diff(before: dict, after: dict) -> list:
+        """Compute a human-readable list of scene state changes between two snapshots."""
+        changes = []
+        for name in after:
+            if name not in before:
+                changes.append(f"{name} appeared in scene")
+        for name in before:
+            if name not in after:
+                changes.append(f"{name} removed from scene")
+        for name in after:
+            if name in before:
+                for prop in ("is_gripped", "is_assembled", "parent_frame"):
+                    if before[name].get(prop) != after[name].get(prop):
+                        changes.append(
+                            f"{name}.{prop} changed to {after[name][prop]}"
+                        )
+        return changes
+
     def _execute_single_action(self, input_str: str) -> str:
         """Execute a single action at a specific index.
         Note: Accepts 1-based index (GUI) and converts to 0-based (internal)."""
         try:
             user_index = None
-            
+
             # Handle multiple input formats from LangChain
             if isinstance(input_str, dict):
                 user_index = input_str.get("index")
@@ -956,9 +978,15 @@ class RsapTools:
 
             if internal_index >= len(self.rsap.action_list) or internal_index < 0:
                 return json.dumps({
-                    "success": False, 
+                    "success": False,
                     "error": f"Index {user_index} out of range (valid: 1-{len(self.rsap.action_list)})"
                 })
+
+            # Phase 3: snapshot scene state before execution
+            before_snapshot = {}
+            if self._assembly_knowledge is not None:
+                self._assembly_knowledge._ensure_scene_updated()
+                before_snapshot = self._assembly_knowledge._get_scene_snapshot()
 
             self.rsap.set_current_action(internal_index)
             success = self.rsap.execute_current_action()
@@ -969,6 +997,14 @@ class RsapTools:
                 "action_name": self.rsap.get_current_action_name(),
                 "message": "Action executed successfully" if success else "Action execution failed"
             }
+
+            # Phase 3: snapshot after and report state changes
+            if self._assembly_knowledge is not None:
+                self._assembly_knowledge._ensure_scene_updated()
+                after_snapshot = self._assembly_knowledge._get_scene_snapshot()
+                state_changes = self._compute_state_diff(before_snapshot, after_snapshot)
+                if state_changes:
+                    result["state_changes"] = state_changes
 
             # Include error details from the action's log entry on failure
             if not success:

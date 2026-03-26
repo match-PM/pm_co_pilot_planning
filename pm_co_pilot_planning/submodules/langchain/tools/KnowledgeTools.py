@@ -242,7 +242,7 @@ class KnowledgeTools:
                     "learned": entry.get("learned", []),
                 })
             else:
-                # Return all knowledge for planning
+                # Return all knowledge for planning, with coverage info
                 formatted_services = {}
                 for svc_name, entry in services.items():
                     formatted_services[svc_name] = {
@@ -253,8 +253,11 @@ class KnowledgeTools:
                         "learned": entry.get("learned", []),
                     }
 
+                documented = list(services.keys())
                 return json.dumps({
                     "success": True,
+                    "knowledge_coverage": f"{len(documented)} services have documented knowledge",
+                    "documented_services": documented,
                     "service_count": len(formatted_services),
                     "services": formatted_services,
                     "general_knowledge": general,
@@ -397,19 +400,36 @@ class KnowledgeTools:
                 entry = services[service_name]
 
                 if field in ("preconditions", "postconditions"):
-                    # Add fact token directly
+                    # Add fact token directly; acknowledge if already known (not an error)
                     target_list = entry.setdefault(field, [])
                     if content in target_list:
                         return json.dumps({
-                            "success": False,
-                            "error": f"'{content}' already exists in {field} for {service_name}.",
+                            "success": True,
+                            "status": "already_known",
+                            "message": f"'{content}' already exists in {field} for {service_name}.",
                         })
                     target_list.append(content)
                     result_msg = f"Added '{content}' to {field} of {service_name}."
 
                 else:
-                    # Add usage_notes entry with metadata
+                    # Add usage_notes entry with metadata, or reinforce if duplicate
                     target_list = entry.setdefault("usage_notes", [])
+
+                    # Check for duplicate note text → reinforce confidence instead of rejecting
+                    for existing in target_list:
+                        if isinstance(existing, dict) and existing.get("note") == content:
+                            old_conf = existing.get("confidence", 0.7)
+                            new_conf = min(1.0, round(old_conf + 0.1, 2))
+                            existing["confidence"] = new_conf
+                            existing["confirmation_count"] = existing.get("confirmation_count", 1) + 1
+                            _save_knowledge(self._knowledge_path, data)
+                            return json.dumps({
+                                "success": True,
+                                "status": "reinforced",
+                                "id": existing.get("id"),
+                                "message": f"Reinforced existing note (confidence {old_conf} → {new_conf}).",
+                            })
+
                     # Generate ID
                     existing_ids = [n.get("id", "") for n in target_list if isinstance(n, dict)]
                     max_num = 0
@@ -430,6 +450,7 @@ class KnowledgeTools:
                         "confidence": confidence,
                         "source": source,
                         "created": date.today().isoformat(),
+                        "confirmation_count": 1,
                     }
                     target_list.append(new_entry)
                     result_msg = f"Added usage note '{new_id}' to {service_name}."
