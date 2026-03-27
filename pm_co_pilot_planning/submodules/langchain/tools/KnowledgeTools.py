@@ -11,7 +11,7 @@ import json
 import os
 import threading
 import yaml
-from datetime import date
+from datetime import date, datetime
 from typing import Optional, List, Dict, Any
 
 from langchain_core.tools import StructuredTool
@@ -484,7 +484,7 @@ class KnowledgeTools:
                             "note": content,
                             "confidence": confidence,
                             "source": source,
-                            "created": date.today().isoformat(),
+                            "created": datetime.now().strftime("%Y-%m-%d %H:%M"),
                             "confirmation_count": 1,
                         }
                         target_list.append(new_entry)
@@ -511,7 +511,7 @@ class KnowledgeTools:
                         "rule": content,
                         "confidence": confidence,
                         "source": source,
-                        "created": date.today().isoformat(),
+                        "created": datetime.now().strftime("%Y-%m-%d %H:%M"), 
                     }
                     general.append(new_entry)
                     result_msg = f"Added general knowledge entry '{new_id}'."

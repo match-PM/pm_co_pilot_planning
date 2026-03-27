@@ -84,8 +84,8 @@ class Agent:
         self._executor_system_prompt = executor_config.system_prompt
 
         # Context window size for executor (number of recent messages to keep)
-        # ~20 messages ≈ last 10 tool call/response pairs, enough for 2-3 retry cycles
-        self.executor_context_window = 20
+        # ~30 messages ≈ last 15 tool call/response pairs, enough for 2-3 retry cycles
+        self.executor_context_window = 30
 
         # ── Full tool set for planner ───────────────────────────────────────────
         self.tools = [
@@ -272,7 +272,7 @@ class Agent:
 
         phase_model = self.model_configs.get(self.current_phase, {}).get("name", "unknown")
         self.service_node.get_logger().info(
-            f"Starting agent execution [{self.current_phase} → {phase_model}] for: {user_message[:100]}..."
+            f"Starting agent execution [{self.current_phase} → {phase_model}] for: {user_message}..."
         )
 
         agent_executor = self.create_executor()

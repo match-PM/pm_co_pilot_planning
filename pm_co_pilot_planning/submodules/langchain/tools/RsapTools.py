@@ -71,7 +71,7 @@ class ActionSpec(BaseModel):
     name: str = Field(description="Display name shown in the RSAP UI (e.g. 'Correct UFC Vision 1')")
     parameters: Dict[str, Any] = Field(
         default_factory=dict,
-        description="Parameter key-value pairs to set on the action. Nested dicts for nested ROS messages."
+        description="Parameter key-value pairs to set on the action. Nested dicts for nested ROS messages. Arrays of nested messages must be lists of dicts, e.g. dispense_points: [{frame_name: 'P1', time_ms: 500.0, dispense_z_offset_mm: 0.0}] — never lists of plain strings."
     )
     service_type: Optional[str] = Field(default=None, description="Optional ROS2 service type string")
 
@@ -167,8 +167,11 @@ class RsapTools:
             name="set_action_parameters",
             description="""Set or update parameters for an action at a specific index in the sequence.
             For nested messages (like Vector3, Quaternion), use nested dictionaries with the field names.
+            For arrays of nested messages, use a list of dictionaries (NOT a list of strings).
             Example for simple params: index=1, parameters={"speed": 0.5, "timeout": 10.0}
             Example for nested params: index=3, parameters={"translation": {"x": 0.1, "y": 0.0, "z": 0.0}, "rotation": {"x": 0.0, "y": 0.0, "z": 0.0, "w": 1.0}, "execute_movement": true}
+            Example for array of nested messages (e.g. DispensePoint[]): index=5, parameters={"dispense_points": [{"frame_name": "Point_1", "time_ms": 500.0, "dispense_z_offset_mm": 0.0}, {"frame_name": "Point_2", "time_ms": 500.0, "dispense_z_offset_mm": 0.0}]}
+            WRONG: parameters={"dispense_points": ["Point_1", "Point_2"]}  ← bare strings are never valid for message arrays
             Returns success or failure message.""",
             args_schema=SetActionParametersInput
         )
