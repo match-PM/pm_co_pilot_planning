@@ -17,7 +17,10 @@ from typing import Optional, List, Dict, Any
 from langchain_core.tools import StructuredTool
 from pydantic import BaseModel, Field
 from rclpy.node import Node
-from ament_index_python.packages import get_package_share_directory
+
+from pm_co_pilot_planning.submodules.langchain.tools._helpers import (
+    ToolResponse, generate_sequential_id, load_assembly_config,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -91,14 +94,6 @@ class RecordKnowledgeInput(BaseModel):
 # Helper functions
 # ---------------------------------------------------------------------------
 
-def _load_assembly_config() -> Dict[str, str]:
-    """Load assembly_config.yaml from the ROS share directory."""
-    package_path = get_package_share_directory("pm_co_pilot_planning")
-    config_path = os.path.join(package_path, "assembly_config.yaml")
-    with open(config_path, "r") as f:
-        return yaml.safe_load(f)
-
-
 def _load_knowledge(knowledge_path: str) -> Dict[str, Any]:
     """Load the service_knowledge.yaml file. Returns empty structure if not found."""
     if not os.path.isfile(knowledge_path):
@@ -143,7 +138,7 @@ class KnowledgeTools:
         self.service_node.get_logger().info("Initializing KnowledgeTools...")
 
         try:
-            cfg = _load_assembly_config()
+            cfg = load_assembly_config()
             self._db_root = cfg.get("assembly_database_path", "")
             kb_subdir = cfg.get("knowledge_base_subdir", "Knowledge_Base")
             self._kb_root = os.path.join(self._db_root, kb_subdir)
@@ -227,28 +222,24 @@ class KnowledgeTools:
             general = data.get("general_knowledge", [])
 
             if service_name:
-                # Return knowledge for a specific service
                 if service_name not in services:
-                    return json.dumps({
-                        "success": True,
-                        "service": service_name,
-                        "found": False,
-                        "note": f"No knowledge entry for '{service_name}'. You may need to reason from first principles or check get_available_services.",
-                    })
+                    return ToolResponse.success(
+                        service=service_name,
+                        found=False,
+                        note=f"No knowledge entry for '{service_name}'. You may need to reason from first principles or check get_available_services.",
+                    )
 
                 entry = services[service_name]
-                return json.dumps({
-                    "success": True,
-                    "service": service_name,
-                    "found": True,
-                    "description": entry.get("description", ""),
-                    "preconditions": entry.get("preconditions", []),
-                    "postconditions": entry.get("postconditions", []),
-                    "usage_notes": entry.get("usage_notes", []),
-                    "learned": entry.get("learned", []),
-                })
+                return ToolResponse.success(
+                    service=service_name,
+                    found=True,
+                    description=entry.get("description", ""),
+                    preconditions=entry.get("preconditions", []),
+                    postconditions=entry.get("postconditions", []),
+                    usage_notes=entry.get("usage_notes", []),
+                    learned=entry.get("learned", []),
+                )
             else:
-                # Return all knowledge for planning, with coverage info
                 formatted_services = {}
                 for svc_name, entry in services.items():
                     formatted_services[svc_name] = {
@@ -260,17 +251,16 @@ class KnowledgeTools:
                     }
 
                 documented = list(services.keys())
-                return json.dumps({
-                    "success": True,
-                    "knowledge_coverage": f"{len(documented)} services have documented knowledge",
-                    "documented_services": documented,
-                    "service_count": len(formatted_services),
-                    "services": formatted_services,
-                    "general_knowledge": general,
-                })
+                return ToolResponse.success(
+                    knowledge_coverage=f"{len(documented)} services have documented knowledge",
+                    documented_services=documented,
+                    service_count=len(formatted_services),
+                    services=formatted_services,
+                    general_knowledge=general,
+                )
 
         except Exception as e:
-            return json.dumps({"success": False, "error": str(e)})
+            return ToolResponse.error(str(e))
 
     def _get_similar_assembly_example(
         self, component_names: List[str] = None, assembly_name: str = ""
@@ -280,12 +270,10 @@ class KnowledgeTools:
             component_names = []
         try:
             if not os.path.isdir(self._examples_dir):
-                return json.dumps({
-                    "success": True,
-                    "count": 0,
-                    "examples": [],
-                    "note": "No examples directory found. Build sequences from service knowledge instead.",
-                })
+                return ToolResponse.success(
+                    count=0, examples=[],
+                    note="No examples directory found. Build sequences from service knowledge instead.",
+                )
 
             matches = []
             search_terms = set(n.lower() for n in component_names)
@@ -311,7 +299,6 @@ class KnowledgeTools:
                 )
                 example_assembly = metadata.get("assembly", "").lower()
 
-                # Score by overlap
                 score = 0
                 if search_terms and example_components:
                     overlap = search_terms & example_components
@@ -327,18 +314,14 @@ class KnowledgeTools:
                         "sequence_pattern": example.get("sequence_pattern", []),
                     })
 
-            # Sort by score descending
             matches.sort(key=lambda m: -m["score"])
 
             if not matches:
-                return json.dumps({
-                    "success": True,
-                    "count": 0,
-                    "examples": [],
-                    "note": "No matching examples found. Build the sequence from service knowledge instead.",
-                })
+                return ToolResponse.success(
+                    count=0, examples=[],
+                    note="No matching examples found. Build the sequence from service knowledge instead.",
+                )
 
-            # Return top 3
             results = []
             for m in matches[:3]:
                 results.append({
@@ -349,14 +332,10 @@ class KnowledgeTools:
                     "sequence_pattern": m["sequence_pattern"],
                 })
 
-            return json.dumps({
-                "success": True,
-                "count": len(results),
-                "examples": results,
-            })
+            return ToolResponse.success(count=len(results), examples=results)
 
         except Exception as e:
-            return json.dumps({"success": False, "error": str(e)})
+            return ToolResponse.error(str(e))
 
     def _record_knowledge(
         self,
@@ -369,33 +348,26 @@ class KnowledgeTools:
     ) -> str:
         """Save new knowledge to the service knowledge base."""
         try:
-            # Validate source
             if source not in ("user_correction", "experience"):
-                return json.dumps({
-                    "success": False,
-                    "error": f"Invalid source '{source}'. Must be 'user_correction' or 'experience'.",
-                })
+                return ToolResponse.error(
+                    f"Invalid source '{source}'. Must be 'user_correction' or 'experience'."
+                )
 
-            # Validate field
             valid_fields = ("preconditions", "postconditions", "usage_notes", "parameters")
             if service_name and field not in valid_fields:
-                return json.dumps({
-                    "success": False,
-                    "error": f"Invalid field '{field}'. Must be one of: {', '.join(valid_fields)}.",
-                })
+                return ToolResponse.error(
+                    f"Invalid field '{field}'. Must be one of: {', '.join(valid_fields)}."
+                )
 
-            # Clamp confidence
             confidence = max(0.0, min(1.0, confidence))
 
             with self._write_lock:
                 data = _load_knowledge(self._knowledge_path)
 
                 if service_name:
-                    # Record to a specific service
                     services = data.setdefault("services", {})
 
                     if service_name not in services:
-                        # Create a new service entry
                         services[service_name] = {
                             "description": "",
                             "preconditions": [],
@@ -407,38 +379,31 @@ class KnowledgeTools:
                     entry = services[service_name]
 
                     if field in ("preconditions", "postconditions"):
-                        # Add fact token directly; acknowledge if already known (not an error)
                         target_list = entry.setdefault(field, [])
                         if content in target_list:
-                            return json.dumps({
-                                "success": True,
-                                "status": "already_known",
-                                "message": f"'{content}' already exists in {field} for {service_name}.",
-                            })
+                            return ToolResponse.success(
+                                status="already_known",
+                                message=f"'{content}' already exists in {field} for {service_name}.",
+                            )
                         target_list.append(content)
                         result_msg = f"Added '{content}' to {field} of {service_name}."
 
                     elif field == "parameters":
-                        # Parse JSON: {"name": "...", "type": "...", "description": "..."}
                         try:
                             param_data = json.loads(content)
                         except json.JSONDecodeError as exc:
-                            return json.dumps({
-                                "success": False,
-                                "error": (
-                                    f"content must be valid JSON for field='parameters'. "
-                                    f"Expected: {{\"name\": \"...\", \"type\": \"...\", \"description\": \"...\"}}. "
-                                    f"Parse error: {exc}"
-                                ),
-                            })
+                            return ToolResponse.error(
+                                f"content must be valid JSON for field='parameters'. "
+                                f"Expected: {{\"name\": \"...\", \"type\": \"...\", \"description\": \"...\"}}. "
+                                f"Parse error: {exc}"
+                            )
                         param_name = param_data.get("name", "").strip()
                         param_type = param_data.get("type", "").strip()
                         param_desc = param_data.get("description", "").strip()
                         if not param_name:
-                            return json.dumps({
-                                "success": False,
-                                "error": "content JSON must include a non-empty 'name' key.",
-                            })
+                            return ToolResponse.error(
+                                "content JSON must include a non-empty 'name' key."
+                            )
                         params_dict = entry.setdefault("parameters", {})
                         params_dict[param_name] = {
                             "type": param_type or "unknown",
@@ -447,10 +412,9 @@ class KnowledgeTools:
                         result_msg = f"Added/updated parameter '{param_name}' in {service_name}."
 
                     else:
-                        # Add usage_notes entry with metadata, or reinforce if duplicate
                         target_list = entry.setdefault("usage_notes", [])
 
-                        # Check for duplicate note text → reinforce confidence instead of rejecting
+                        # Check for duplicate note text -> reinforce confidence
                         for existing in target_list:
                             if isinstance(existing, dict) and existing.get("note") == content:
                                 old_conf = existing.get("confidence", 0.7)
@@ -458,26 +422,15 @@ class KnowledgeTools:
                                 existing["confidence"] = new_conf
                                 existing["confirmation_count"] = existing.get("confirmation_count", 1) + 1
                                 _save_knowledge(self._knowledge_path, data)
-                                return json.dumps({
-                                    "success": True,
-                                    "status": "reinforced",
-                                    "id": existing.get("id"),
-                                    "message": f"Reinforced existing note (confidence {old_conf} → {new_conf}).",
-                                })
+                                return ToolResponse.success(
+                                    status="reinforced",
+                                    id=existing.get("id"),
+                                    message=f"Reinforced existing note (confidence {old_conf} -> {new_conf}).",
+                                )
 
-                        # Generate ID
                         existing_ids = [n.get("id", "") for n in target_list if isinstance(n, dict)]
-                        max_num = 0
-                        for eid in existing_ids:
-                            parts = eid.rsplit("_", 1)
-                            if len(parts) == 2:
-                                try:
-                                    max_num = max(max_num, int(parts[1]))
-                                except ValueError:
-                                    pass
-                        # Use a short service suffix for ID readability
                         svc_short = service_name.rsplit("/", 1)[-1] if service_name else "gen"
-                        new_id = f"usage_{svc_short}_{max_num + 1:03d}"
+                        new_id = generate_sequential_id(f"usage_{svc_short}", existing_ids)
 
                         new_entry = {
                             "id": new_id,
@@ -491,19 +444,9 @@ class KnowledgeTools:
                         result_msg = f"Added usage note '{new_id}' to {service_name}."
 
                 else:
-                    # Record to general_knowledge
                     general = data.setdefault("general_knowledge", [])
-                    # Generate ID
                     existing_ids = [g.get("id", "") for g in general if isinstance(g, dict)]
-                    max_num = 0
-                    for gid in existing_ids:
-                        parts = gid.rsplit("_", 1)
-                        if len(parts) == 2:
-                            try:
-                                max_num = max(max_num, int(parts[1]))
-                            except ValueError:
-                                pass
-                    new_id = f"general_{max_num + 1:03d}"
+                    new_id = generate_sequential_id("general", existing_ids)
 
                     new_entry = {
                         "id": new_id,
@@ -511,7 +454,7 @@ class KnowledgeTools:
                         "rule": content,
                         "confidence": confidence,
                         "source": source,
-                        "created": datetime.now().strftime("%Y-%m-%d %H:%M"), 
+                        "created": datetime.now().strftime("%Y-%m-%d %H:%M"),
                     }
                     general.append(new_entry)
                     result_msg = f"Added general knowledge entry '{new_id}'."
@@ -527,4 +470,4 @@ class KnowledgeTools:
             return json.dumps(result)
 
         except Exception as e:
-            return json.dumps({"success": False, "error": str(e)})
+            return ToolResponse.error(str(e))

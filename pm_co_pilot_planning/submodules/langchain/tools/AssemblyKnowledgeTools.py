@@ -15,18 +15,20 @@ Frame naming convention (enforced by assembly_manager when spawning):
 import json
 import os
 import re
-import yaml
 from typing import Optional, List, Dict, Any
 
 from langchain_core.tools import Tool, StructuredTool
 from pydantic import BaseModel, Field
 from rclpy.node import Node
-from ament_index_python.packages import get_package_share_directory
 import assembly_manager_interfaces.msg as am_msgs
 import rclpy
 from rosidl_runtime_py.convert import message_to_ordereddict
 from rosidl_runtime_py.set_message import set_message_fields
 from ros_sequential_action_programmer.submodules.RosSequentialActionProgrammer import RosSequentialActionProgrammer
+
+from pm_co_pilot_planning.submodules.langchain.tools._helpers import (
+    ToolResponse, PoseHelper, FrameHelper, SceneHelper, ValueSetHelper, load_assembly_config,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -79,14 +81,6 @@ class GetFramePropertiesInput(BaseModel):
 # ---------------------------------------------------------------------------
 # Helper functions
 # ---------------------------------------------------------------------------
-
-def _load_assembly_config() -> Dict[str, str]:
-    """Load assembly_config.yaml from the ROS share directory."""
-    package_path = get_package_share_directory("pm_co_pilot_planning")
-    config_path = os.path.join(package_path, "assembly_config.yaml")
-    with open(config_path, "r") as f:
-        return yaml.safe_load(f)
-
 
 def _categorize_frames(ref_frames: List[Dict[str, Any]]) -> Dict[str, Any]:
     """
@@ -217,7 +211,7 @@ class AssemblyKnowledgeTools:
         self.service_node.get_logger().info("Subscribed to /assembly_manager/scene for live scene updates.")
 
         try:
-            cfg = _load_assembly_config()
+            cfg = load_assembly_config()
             self._db_root = cfg.get("assembly_database_path", "")
             self._components_root = os.path.join(
                 self._db_root, cfg.get("components_subdir", "Assembly_Part_Data")
@@ -459,7 +453,7 @@ class AssemblyKnowledgeTools:
     def _list_available_components(self) -> str:
         try:
             if not self._components_root:
-                return json.dumps({"error": "Assembly database path not configured"})
+                return ToolResponse.error("Assembly database path not configured")
 
             candidates = _scan_json_files(self._components_root, "Component")
             results = []
@@ -481,24 +475,22 @@ class AssemblyKnowledgeTools:
                     "gonio_side": gonio_side,
                 })
 
-            return json.dumps({
-                "success": True,
-                "count": len(results),
-                "components": sorted(results, key=lambda x: x["name"]),
-            })
+            return ToolResponse.success(
+                count=len(results),
+                components=sorted(results, key=lambda x: x["name"]),
+            )
 
         except Exception as e:
-            return json.dumps({"success": False, "error": str(e)})
+            return ToolResponse.error(str(e))
 
     def _get_component_description(self, file_path: str) -> str:
         try:
             resolved = _resolve_file_path(file_path, "Component", self._components_root)
             if resolved is None:
-                return json.dumps({
-                    "success": False,
-                    "error": f"Component not found: '{file_path}'. "
-                             "Use list_available_components to see what is available.",
-                })
+                return ToolResponse.error(
+                    f"Component not found: '{file_path}'. "
+                    "Use list_available_components to see what is available."
+                )
 
             with open(resolved, "r") as f:
                 data = json.load(f)
@@ -521,6 +513,15 @@ class AssemblyKnowledgeTools:
                     return f"{component_name}_{frames}"
                 return None
 
+            def glue_point_entries(names, prefixed=False):
+                return [
+                    {
+                        "name": f"{component_name}_{n}" if prefixed else n,
+                        "spawned_properties": {"has_been_placed": False, "has_been_cured": False},
+                    }
+                    for n in names
+                ]
+
             summary = {
                 "success": True,
                 "name": component_name,
@@ -537,32 +538,14 @@ class AssemblyKnowledgeTools:
                 "frames": {
                     "vision_points": frame_categories["vision_points"],
                     "laser_measurement_frames": frame_categories["laser_measurement_frames"],
-                    "glue_points": [
-                        {
-                            "name": name,
-                            "spawned_properties": {
-                                "has_been_placed": False,
-                                "has_been_cured": False,
-                            },
-                        }
-                        for name in frame_categories["glue_points"]
-                    ],
+                    "glue_points": glue_point_entries(frame_categories["glue_points"]),
                     "gripping_point": frame_categories["gripping_point"],
                     "other_frames": frame_categories["other_frames"],
                 },
                 "spawned_frame_names": {
                     "vision_points": prefix(frame_categories["vision_points"]),
                     "laser_measurement_frames": prefix(frame_categories["laser_measurement_frames"]),
-                    "glue_points": [
-                        {
-                            "name": f"{component_name}_{name}",
-                            "spawned_properties": {
-                                "has_been_placed": False,
-                                "has_been_cured": False,
-                            },
-                        }
-                        for name in frame_categories["glue_points"]
-                    ],
+                    "glue_points": glue_point_entries(frame_categories["glue_points"], prefixed=True),
                     "gripping_point": prefix(frame_categories["gripping_point"]),
                 },
                 "roles": {
@@ -576,12 +559,12 @@ class AssemblyKnowledgeTools:
             return json.dumps(summary)
 
         except Exception as e:
-            return json.dumps({"success": False, "error": str(e)})
+            return ToolResponse.error(str(e))
 
     def _list_available_assemblies(self) -> str:
         try:
             if not self._components_root:
-                return json.dumps({"error": "Assembly database path not configured"})
+                return ToolResponse.error("Assembly database path not configured")
 
             candidates = _scan_json_files(self._components_root, "Assembly")
             results = []
@@ -602,24 +585,22 @@ class AssemblyKnowledgeTools:
                     "components": component_names,
                 })
 
-            return json.dumps({
-                "success": True,
-                "count": len(results),
-                "assemblies": sorted(results, key=lambda x: x["name"]),
-            })
+            return ToolResponse.success(
+                count=len(results),
+                assemblies=sorted(results, key=lambda x: x["name"]),
+            )
 
         except Exception as e:
-            return json.dumps({"success": False, "error": str(e)})
+            return ToolResponse.error(str(e))
 
     def _get_assembly_description(self, file_path: str) -> str:
         try:
             resolved = _resolve_file_path(file_path, "Assembly", self._components_root)
             if resolved is None:
-                return json.dumps({
-                    "success": False,
-                    "error": f"Assembly not found: '{file_path}'. "
-                             "Use list_available_assemblies to see what is available.",
-                })
+                return ToolResponse.error(
+                    f"Assembly not found: '{file_path}'. "
+                    "Use list_available_assemblies to see what is available."
+                )
 
             with open(resolved, "r") as f:
                 data = json.load(f)
@@ -640,17 +621,16 @@ class AssemblyKnowledgeTools:
                 f.get("name", "") for f in data.get("ref_frames", [])
             ]
 
-            return json.dumps({
-                "success": True,
-                "name": data.get("name", ""),
-                "file_path": resolved,
-                "components": components,
-                "assembly_constraints": constraints,
-                "assembly_frames": assembly_frames,
-            })
+            return ToolResponse.success(
+                name=data.get("name", ""),
+                file_path=resolved,
+                components=components,
+                assembly_constraints=constraints,
+                assembly_frames=assembly_frames,
+            )
 
         except Exception as e:
-            return json.dumps({"success": False, "error": str(e)})
+            return ToolResponse.error(str(e))
 
     # ------------------------------------------------------------------
     # Live scene tools
@@ -659,273 +639,111 @@ class AssemblyKnowledgeTools:
     def _list_objects_in_scene(self) -> str:
         """Return all objects currently in the live assembly scene."""
         try:
-            self._ensure_scene_updated()
-            if self._current_scene is None:
-                return json.dumps({
-                    "success": False,
-                    "error": "No scene received yet. The /assembly_manager/scene topic may not be publishing.",
-                })
+            scene, err = SceneHelper.ensure_and_validate(self)
+            if err:
+                return err
 
             objects = []
-            for obj in self._current_scene.objects_in_scene:
+            for obj in scene.objects_in_scene:
                 objects.append({
                     "obj_name": obj.obj_name,
                     "parent_frame": obj.parent_frame,
-                        "properties": {
-                            "is_gripped": obj.properties.is_gripped,
-                            "is_assembled": obj.properties.is_assembled,
-                        },
+                    "properties": {
+                        "is_gripped": obj.properties.is_gripped,
+                        "is_assembled": obj.properties.is_assembled,
+                    },
                 })
 
-            return json.dumps({
-                "success": True,
-                "count": len(objects),
-                "objects": objects,
-            })
+            return ToolResponse.success(count=len(objects), objects=objects)
 
         except Exception as e:
-            return json.dumps({"success": False, "error": str(e)})
-        
+            return ToolResponse.error(str(e))
+
     def _get_object_properties(self, obj_name: str) -> str:
         """Return properties of a named object in the live scene."""
         try:
-            self._ensure_scene_updated()
-            if self._current_scene is None:
-                return json.dumps({
-                    "success": False,
-                    "error": "No scene received yet. The /assembly_manager/scene topic may not be publishing.",
-                })
+            scene, err = SceneHelper.ensure_and_validate(self)
+            if err:
+                return err
 
-            for obj in self._current_scene.objects_in_scene:
-                if obj.obj_name == obj_name:
-                    return json.dumps({
-                        "success": True,
-                        "obj_name": obj.obj_name,
-                        "parent_frame": obj.parent_frame,
-                        "properties": {
-                            "is_gripped": obj.properties.is_gripped,
-                            "is_assembled": obj.properties.is_assembled,
-                        },
-                    })
+            obj, err = SceneHelper.find_object(scene, obj_name)
+            if err:
+                return err
 
-            available = [o.obj_name for o in self._current_scene.objects_in_scene]
-            return json.dumps({
-                "success": False,
-                "error": f"Object '{obj_name}' not found in scene. Available: {available}",
-            })
+            return ToolResponse.success(
+                obj_name=obj.obj_name,
+                parent_frame=obj.parent_frame,
+                properties={
+                    "is_gripped": obj.properties.is_gripped,
+                    "is_assembled": obj.properties.is_assembled,
+                },
+            )
 
         except Exception as e:
-            return json.dumps({"success": False, "error": str(e)})
+            return ToolResponse.error(str(e))
 
     def _get_object_frames(self, obj_name: str) -> str:
         """Return all reference frames for a named object in the live scene."""
         try:
-            self._ensure_scene_updated()
-            if self._current_scene is None:
-                return json.dumps({
-                    "success": False,
-                    "error": "No scene received yet. The /assembly_manager/scene topic may not be publishing.",
-                })
+            scene, err = SceneHelper.ensure_and_validate(self)
+            if err:
+                return err
 
-            target_obj = None
-            for obj in self._current_scene.objects_in_scene:
-                if obj.obj_name == obj_name:
-                    target_obj = obj
-                    break
+            target_obj, err = SceneHelper.find_object(scene, obj_name)
+            if err:
+                return err
 
-            if target_obj is None:
-                available = [o.obj_name for o in self._current_scene.objects_in_scene]
-                return json.dumps({
-                    "success": False,
-                    "error": f"Object '{obj_name}' not found in scene. Available: {available}",
-                })
+            frames = [FrameHelper.to_dict(fr) for fr in target_obj.ref_frames]
 
-            frames = []
-            for fr in target_obj.ref_frames:
-                p = fr.properties
-                frames.append({
-                    "frame_name": fr.frame_name,
-                    "parent_frame": fr.parent_frame,
-                    "pose": {
-                        "position": {
-                            "x": fr.pose.position.x,
-                            "y": fr.pose.position.y,
-                            "z": fr.pose.position.z,
-                        },
-                        "orientation": {
-                            "x": fr.pose.orientation.x,
-                            "y": fr.pose.orientation.y,
-                            "z": fr.pose.orientation.z,
-                            "w": fr.pose.orientation.w,
-                        },
-                    },
-                    "properties_summary": {
-                        "is_vision_frame": p.vision_frame_properties.is_vision_frame,
-                        "is_laser_frame": p.laser_frame_properties.is_laser_frame,
-                        "is_glue_point": p.glue_pt_frame_properties.is_glue_point,
-                        "is_gripping_frame": p.gripping_frame_properties.is_gripping_frame,
-                        "is_assembly_frame": p.assembly_frame_properties.is_assembly_frame,
-                        "is_target_frame": p.assembly_frame_properties.is_target_frame,
-                    },
-                })
-
-            return json.dumps({
-                "success": True,
-                "obj_name": obj_name,
-                "frame_count": len(frames),
-                "frames": frames,
-            })
+            return ToolResponse.success(
+                obj_name=obj_name,
+                frame_count=len(frames),
+                frames=frames,
+            )
 
         except Exception as e:
-            return json.dumps({"success": False, "error": str(e)})
+            return ToolResponse.error(str(e))
 
     def _get_frame_properties(self, frame_name: str) -> str:
         """Return full properties of a named frame from any object in the live scene."""
         try:
-            self._ensure_scene_updated()
-            if self._current_scene is None:
-                return json.dumps({
-                    "success": False,
-                    "error": "No scene received yet. The /assembly_manager/scene topic may not be publishing.",
-                })
+            scene, err = SceneHelper.ensure_and_validate(self)
+            if err:
+                return err
 
-            for obj in self._current_scene.objects_in_scene:
-                for fr in obj.ref_frames:
-                    if fr.frame_name == frame_name:
-                        p = fr.properties
-                        vp = p.vision_frame_properties
-                        gp = p.glue_pt_frame_properties
-                        lp = p.laser_frame_properties
-                        grf = p.gripping_frame_properties
-                        af = p.assembly_frame_properties
-                        return json.dumps({
-                            "success": True,
-                            "frame_name": fr.frame_name,
-                            "parent_frame": fr.parent_frame,
-                            "belongs_to_object": obj.obj_name,
-                            "pose": {
-                                "position": {
-                                    "x": fr.pose.position.x,
-                                    "y": fr.pose.position.y,
-                                    "z": fr.pose.position.z,
-                                },
-                                "orientation": {
-                                    "x": fr.pose.orientation.x,
-                                    "y": fr.pose.orientation.y,
-                                    "z": fr.pose.orientation.z,
-                                    "w": fr.pose.orientation.w,
-                                },
-                            },
-                            "properties": {
-                                "vision_frame": {
-                                    "is_vision_frame": vp.is_vision_frame,
-                                    "has_been_measured": vp.has_been_measured,
-                                },
-                                "glue_pt_frame": {
-                                    "is_glue_point": gp.is_glue_point,
-                                    "has_been_placed": gp.has_been_placed,
-                                    "has_been_cured": gp.has_been_cured,
-                                    "time_ms": gp.time_ms,
-                                    "dispense_offset_mm": gp.dispense_offset_mm,
-                                },
-                                "laser_frame": {
-                                    "is_laser_frame": lp.is_laser_frame,
-                                    "has_been_measured": lp.has_been_measured,
-                                },
-                                "gripping_frame": {
-                                    "is_gripping_frame": grf.is_gripping_frame,
-                                    "compatible_grippers": list(grf.compatible_grippers),
-                                    "compatible_gripper_tips": list(grf.compatible_gripper_tips),
-                                },
-                                "assembly_frame": {
-                                    "is_assembly_frame": af.is_assembly_frame,
-                                    "is_target_frame": af.is_target_frame,
-                                    "associated_frame": af.associated_frame,
-                                },
-                            },
-                        })
+            fr, obj_name, err = SceneHelper.find_frame(scene, frame_name)
+            if err:
+                return err
 
-            # Also check scene-level ref_frames (not attached to any object)
-            for fr in self._current_scene.ref_frames_in_scene:
-                if fr.frame_name == frame_name:
-                    return json.dumps({
-                        "success": True,
-                        "frame_name": fr.frame_name,
-                        "parent_frame": fr.parent_frame,
-                        "belongs_to_object": None,
-                        "note": "This is a scene-level frame (not attached to a specific object).",
-                        "pose": {
-                            "position": {
-                                "x": fr.pose.position.x,
-                                "y": fr.pose.position.y,
-                                "z": fr.pose.position.z,
-                            },
-                            "orientation": {
-                                "x": fr.pose.orientation.x,
-                                "y": fr.pose.orientation.y,
-                                "z": fr.pose.orientation.z,
-                                "w": fr.pose.orientation.w,
-                            },
-                        },
-                    })
-
-            all_frames = [
-                fr.frame_name
-                for obj in self._current_scene.objects_in_scene
-                for fr in obj.ref_frames
-            ]
-            return json.dumps({
-                "success": False,
-                "error": f"Frame '{frame_name}' not found in scene.",
-                "available_frames": all_frames,
-            })
+            result = FrameHelper.to_dict(fr, obj_name=obj_name, detailed=True)
+            result["success"] = True
+            if obj_name is None:
+                result["note"] = "This is a scene-level frame (not attached to a specific object)."
+            return json.dumps(result)
 
         except Exception as e:
-            return json.dumps({"success": False, "error": str(e)})
-
+            return ToolResponse.error(str(e))
 
     def _get_frames_in_scene(self, parameter_type: Optional[str] = None) -> str:
         """Get frames in the current scene. frames_in_scene + tf_frames"""
         try:
-            # Access the parameter value set generator through RSAP
-            if not hasattr(self.rsap, 'action_parameter_value_manager'):
-                return json.dumps({
-                    "success": False,
-                    "error": "Parameter value manager not available in RSAP instance"
-                })
+            value_set_generator, err = ValueSetHelper.get_generator(self.rsap)
+            if err:
+                return err
 
-            param_manager = self.rsap.action_parameter_value_manager
-            
-            # Access the parameter values set generator (note: it's "values" not "value")
-            if hasattr(param_manager, 'parameter_values_set_generator'):
-                value_set_generator = param_manager.parameter_values_set_generator
-            elif hasattr(param_manager, 'parameter_value_set_generator'):
-                value_set_generator = param_manager.parameter_value_set_generator
-            elif hasattr(param_manager, 'value_sets'):
-                # Manager is the generator itself
-                value_set_generator = param_manager
-            else:
-                # Debug: log what attributes the manager has
-                available_attrs = [attr for attr in dir(param_manager) if not attr.startswith('_')]
-                return json.dumps({
-                    "success": False,
-                    "error": f"Parameter value set generator not available. Available attributes: {available_attrs}"
-                })
-            
             # Update the value sets to get latest data (TF frames, assembly scene, etc.)
             if hasattr(value_set_generator, 'update'):
                 value_set_generator.update()
 
             # Get value sets
             if parameter_type:
-                # Get sets compatible with specific type
                 value_set_names = value_set_generator.value_sets.get_all_value_set_names(parameter_type)
             else:
-                # Get all value sets
                 value_set_names = value_set_generator.value_sets.get_all_value_set_names()
 
             # Filter out unnecessary value sets (too much information for agent)
-            excluded_sets = {'components_in_scene','instructions_in_scene','vision_cameras', 'vision_processes', 'test_set_1', 'test_set_2', 'test_set_3', 'test_set_4'}
+            excluded_sets = {'components_in_scene', 'instructions_in_scene', 'vision_cameras',
+                           'vision_processes', 'test_set_1', 'test_set_2', 'test_set_3', 'test_set_4'}
             value_set_names = [name for name in value_set_names if name not in excluded_sets]
 
             # Build detailed response with actual values
@@ -940,12 +758,11 @@ class AssemblyKnowledgeTools:
                 except Exception as e:
                     self.service_node.get_logger().warn(f"Could not get values for set '{set_name}': {e}")
 
-            return json.dumps({
-                "success": True,
-                "parameter_type": parameter_type if parameter_type else "all",
-                "value_sets": recommendations,
-                "count": len(recommendations)
-            })
+            return ToolResponse.success(
+                parameter_type=parameter_type if parameter_type else "all",
+                value_sets=recommendations,
+                count=len(recommendations),
+            )
 
         except Exception as e:
-            return json.dumps({"success": False, "error": str(e)})
+            return ToolResponse.error(str(e))

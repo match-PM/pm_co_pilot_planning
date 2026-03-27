@@ -275,6 +275,7 @@ planner:
       - For unknown services: reason conservatively from parameter names and types
       - Continue until all preconditions are met (base case: services with no preconditions like spawn)
       - Follow all usage_notes for each service (parameter constraints, required frames, etc.)
+      - Make sure you have followed all the usage_notes and preconditions for each service in your plan!
 
     Step 4 — Build the sequence:
       - Use `build_sequence_from_plan` to create the full sequence in one call.
