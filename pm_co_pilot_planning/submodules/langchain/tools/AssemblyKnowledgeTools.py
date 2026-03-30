@@ -103,13 +103,13 @@ def _categorize_frames(ref_frames: List[Dict[str, Any]]) -> Dict[str, Any]:
         if "_helper" in name.lower():
             continue
 
-        if re.search(r"Vision_Point", name, re.IGNORECASE):
+        if re.search(r"Vision_Point|Vision|vision", name, re.IGNORECASE):
             vision_points.append(name)
-        elif re.search(r"Laser_Mes_Frame|Laser_Frame|Laser_Mes", name, re.IGNORECASE):
+        elif re.search(r"Laser_Mes_Frame|Laser_Frame|Laser_Mes|Laser", name, re.IGNORECASE):
             laser_frames.append(name)
         elif re.search(r"Glue_Point|Glue_Frame|_Glue_", name, re.IGNORECASE):
             glue_points.append(name)
-        elif re.search(r"Gripping_Point|Grip_Point", name, re.IGNORECASE):
+        elif re.search(r"Gripping_Point|Gripping_Frame|Grip_Point", name, re.IGNORECASE):
             gripping_point = name
         else:
             other_frames.append(name)
@@ -573,8 +573,9 @@ class AssemblyKnowledgeTools:
                 try:
                     with open(c["file_path"], "r") as f:
                         data = json.load(f)
+                    mounting = data.get("mountingDescription", {})
                     component_names = [
-                        comp.get("name", "") for comp in data.get("components", [])
+                        comp.get("name", "") for comp in mounting.get("components", [])
                     ]
                 except Exception:
                     pass
@@ -605,20 +606,28 @@ class AssemblyKnowledgeTools:
             with open(resolved, "r") as f:
                 data = json.load(f)
 
+            mounting = data.get("mountingDescription", {})
+            
             components = [
                 {"name": c.get("name", ""), "guid": c.get("guid", "")}
-                for c in data.get("components", [])
+                for c in mounting.get("components", [])
             ]
 
             constraints = []
-            for c in data.get("assemblyConstraints", []):
+            for c in mounting.get("assemblyConstraints", []):
+                # Count plane matches in the "description" object
+                description = c.get("description", {})
+                plane_match_count = sum(1 for key in description.keys() if key.startswith("planeMatch_"))
                 constraints.append({
                     "name": c.get("name", ""),
-                    "plane_matches": len(c.get("planeMatchConstraints", [])),
+                    "component_1": c.get("component_1", ""),
+                    "component_2": c.get("component_2", ""),
+                    "plane_matches": plane_match_count,
                 })
 
+            refs = mounting.get("mountingReferences", {})
             assembly_frames = [
-                f.get("name", "") for f in data.get("ref_frames", [])
+                f.get("name", "") for f in refs.get("ref_frames", [])
             ]
 
             return ToolResponse.success(
