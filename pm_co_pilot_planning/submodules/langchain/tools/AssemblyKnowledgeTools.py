@@ -60,21 +60,9 @@ class GetAvailableServicesInput(BaseModel):
     )
 
 
-class GetObjectPropertiesInput(BaseModel):
-    obj_name: str = Field(
-        description="Name of the object in the scene, e.g. 'UFC_Paper'."
-    )
-
-
 class GetObjectFramesInput(BaseModel):
     obj_name: str = Field(
         description="Name of the object in the scene, e.g. 'UFC_Paper'."
-    )
-
-
-class GetFramePropertiesInput(BaseModel):
-    frame_name: str = Field(
-        description="Full frame name as it appears in the scene, e.g. 'UFC_Paper_Vision_Point_1'."
     )
 
 
@@ -293,38 +281,17 @@ class AssemblyKnowledgeTools:
             args_schema=EmptyInput,
         )
 
-        self.get_object_properties_tool = StructuredTool.from_function(
-            func=self._get_object_properties,
-            name="get_object_properties",
-            description=(
-                "Return the properties of a specific object in the live scene. "
-                "Input: the object name as it appears in the scene (e.g. 'UFC_Paper')."
-            ),
-            args_schema=GetObjectPropertiesInput,
-        )
-
         self.get_object_frames_tool = StructuredTool.from_function(
             func=self._get_object_frames,
             name="get_object_frames",
             description=(
                 "Return all reference frames that belong to a specific object in the live scene. "
                 "Each frame entry includes the frame name, parent frame, pose (position + orientation), "
-                "and a summary of its properties (vision, laser, glue, gripping, assembly). "
+                "and the relevant properties for its frame type "
+                "(e.g. glue_pt_frame_properties for glue points, laser_frame_properties for laser frames, etc.). "
                 "Input: the object name as it appears in the scene (e.g. 'UFC_Paper')."
             ),
             args_schema=GetObjectFramesInput,
-        )
-
-        self.get_frame_properties_tool = StructuredTool.from_function(
-            func=self._get_frame_properties,
-            name="get_frame_properties",
-            description=(
-                "Return the full properties of a specific frame in the live scene, identified by its "
-                "exact frame name (e.g. 'UFC_Paper_Vision_Point_1'). "
-                "Properties include vision, laser, glue, gripping, and assembly frame flags and values. "
-                "Searches across all objects in the scene."
-            ),
-            args_schema=GetFramePropertiesInput,
         )
 
         self.get_frames_in_scene_tool = StructuredTool.from_function(
@@ -431,9 +398,10 @@ class AssemblyKnowledgeTools:
             return f"CURRENT SCENE STATE: Error getting scene summary: {e}"
 
     def _get_scene_snapshot(self) -> dict:
-        """Return a lightweight snapshot of current scene object states for state-diff.
+        """Return a snapshot of current scene object states for state-diff.
 
-        Returns dict of {obj_name: {parent_frame, is_gripped, is_assembled}}.
+        Returns dict of {obj_name: {parent_frame, is_gripped, is_assembled, frames: [...]}}.
+        Each frame includes its relevant type-specific properties.
         Does NOT call _ensure_scene_updated (caller is responsible).
         """
         if self._current_scene is None:
@@ -444,6 +412,7 @@ class AssemblyKnowledgeTools:
                 "parent_frame": obj.parent_frame,
                 "is_gripped": obj.properties.is_gripped,
                 "is_assembled": obj.properties.is_assembled,
+                "frames": [FrameHelper.to_dict(fr) for fr in obj.ref_frames],
             }
         return snapshot
 
@@ -669,31 +638,9 @@ class AssemblyKnowledgeTools:
         except Exception as e:
             return ToolResponse.error(str(e))
 
-    def _get_object_properties(self, obj_name: str) -> str:
-        """Return properties of a named object in the live scene."""
-        try:
-            scene, err = SceneHelper.ensure_and_validate(self)
-            if err:
-                return err
-
-            obj, err = SceneHelper.find_object(scene, obj_name)
-            if err:
-                return err
-
-            return ToolResponse.success(
-                obj_name=obj.obj_name,
-                parent_frame=obj.parent_frame,
-                properties={
-                    "is_gripped": obj.properties.is_gripped,
-                    "is_assembled": obj.properties.is_assembled,
-                },
-            )
-
-        except Exception as e:
-            return ToolResponse.error(str(e))
-
     def _get_object_frames(self, obj_name: str) -> str:
-        """Return all reference frames for a named object in the live scene."""
+        """Return all reference frames for a named object in the live scene,
+        including the relevant type-specific properties for each frame."""
         try:
             scene, err = SceneHelper.ensure_and_validate(self)
             if err:
@@ -703,33 +650,13 @@ class AssemblyKnowledgeTools:
             if err:
                 return err
 
-            frames = [FrameHelper.to_dict(fr) for fr in target_obj.ref_frames]
+            frames = [FrameHelper.to_dict(fr, detailed=True) for fr in target_obj.ref_frames]
 
             return ToolResponse.success(
                 obj_name=obj_name,
                 frame_count=len(frames),
                 frames=frames,
             )
-
-        except Exception as e:
-            return ToolResponse.error(str(e))
-
-    def _get_frame_properties(self, frame_name: str) -> str:
-        """Return full properties of a named frame from any object in the live scene."""
-        try:
-            scene, err = SceneHelper.ensure_and_validate(self)
-            if err:
-                return err
-
-            fr, obj_name, err = SceneHelper.find_frame(scene, frame_name)
-            if err:
-                return err
-
-            result = FrameHelper.to_dict(fr, obj_name=obj_name, detailed=True)
-            result["success"] = True
-            if obj_name is None:
-                result["note"] = "This is a scene-level frame (not attached to a specific object)."
-            return json.dumps(result)
 
         except Exception as e:
             return ToolResponse.error(str(e))

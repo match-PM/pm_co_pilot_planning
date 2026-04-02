@@ -642,12 +642,34 @@ class RsapTools:
             if name not in after:
                 changes.append(f"{name} removed from scene")
         for name in after:
-            if name in before:
-                for prop in ("is_gripped", "is_assembled", "parent_frame"):
-                    if before[name].get(prop) != after[name].get(prop):
-                        changes.append(
-                            f"{name}.{prop} changed to {after[name][prop]}"
-                        )
+            if name not in before:
+                continue
+            # Object-level property changes
+            for prop in ("is_gripped", "is_assembled", "parent_frame"):
+                if before[name].get(prop) != after[name].get(prop):
+                    changes.append(
+                        f"{name}.{prop} changed to {after[name][prop]}"
+                    )
+            # Frame property changes
+            before_frames = {f["frame_name"]: f for f in before[name].get("frames", [])}
+            after_frames = {f["frame_name"]: f for f in after[name].get("frames", [])}
+            for fname in after_frames:
+                if fname not in before_frames:
+                    changes.append(f"{name}: frame {fname} added")
+                    continue
+                before_props = before_frames[fname].get("properties", {})
+                after_props = after_frames[fname].get("properties", {})
+                if before_props != after_props:
+                    for prop_type, prop_values in after_props.items():
+                        old_values = before_props.get(prop_type, {})
+                        for key, val in prop_values.items():
+                            if old_values.get(key) != val:
+                                changes.append(
+                                    f"{fname}.{prop_type}.{key} changed to {val}"
+                                )
+            for fname in before_frames:
+                if fname not in after_frames:
+                    changes.append(f"{name}: frame {fname} removed")
         return changes
 
     def _execute_single_action(self, input_str: str) -> str:
@@ -685,6 +707,8 @@ class RsapTools:
                 state_changes = self._compute_state_diff(before_snapshot, after_snapshot)
                 if state_changes:
                     result["state_changes"] = state_changes
+
+            # result["current_scene_state"] = self._assembly_knowledge._get_scene_snapshot()
 
             if not success:
                 action = self.rsap.get_action_at_index(internal_index)

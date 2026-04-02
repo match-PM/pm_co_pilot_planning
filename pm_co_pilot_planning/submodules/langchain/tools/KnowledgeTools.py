@@ -211,6 +211,39 @@ class KnowledgeTools:
         )
 
     # ------------------------------------------------------------------
+    # Public helpers (called from Agent, not exposed as LLM tools)
+    # ------------------------------------------------------------------
+
+    def get_knowledge_for_services(self, service_names: List[str]) -> str:
+        """Return KB entries for only the given services + general_knowledge as JSON.
+
+        Used by the post-execution learning nudge to inject targeted context
+        into the prompt instead of having the LLM query the full KB.
+        """
+        data = _load_knowledge(self._knowledge_path)
+        services_kb = data.get("services", {})
+        general = data.get("general_knowledge", [])
+
+        subset = {}
+        for svc in service_names:
+            if svc in services_kb:
+                entry = services_kb[svc]
+                subset[svc] = {
+                    "description": entry.get("description", ""),
+                    "preconditions": entry.get("preconditions", []),
+                    "postconditions": entry.get("postconditions", []),
+                    "usage_notes": entry.get("usage_notes", []),
+                    "learned": entry.get("learned", []),
+                }
+            else:
+                subset[svc] = {"not_in_kb": True}
+
+        return json.dumps(
+            {"services": subset, "general_knowledge": general},
+            indent=2, default=str,
+        )
+
+    # ------------------------------------------------------------------
     # Internal implementations
     # ------------------------------------------------------------------
 

@@ -150,67 +150,58 @@ class FrameHelper:
     """Convert ROS frame messages and properties to dictionaries."""
 
     @staticmethod
-    def summary(properties) -> dict:
-        """Compact property flags for frame listing."""
-        return {
-            "is_vision_frame": properties.vision_frame_properties.is_vision_frame,
-            "is_laser_frame": properties.laser_frame_properties.is_laser_frame,
-            "is_glue_point": properties.glue_pt_frame_properties.is_glue_point,
-            "is_gripping_frame": properties.gripping_frame_properties.is_gripping_frame,
-            "is_assembly_frame": properties.assembly_frame_properties.is_assembly_frame,
-            "is_target_frame": properties.assembly_frame_properties.is_target_frame,
-        }
-
-    @staticmethod
-    def detailed(properties) -> dict:
-        """Full property breakdown for single-frame queries."""
+    def relevant_properties(properties) -> dict:
+        """Return only the properties relevant to this frame's type."""
+        result = {}
         vp = properties.vision_frame_properties
         gp = properties.glue_pt_frame_properties
         lp = properties.laser_frame_properties
         grf = properties.gripping_frame_properties
         af = properties.assembly_frame_properties
-        return {
-            "vision_frame": {
-                "is_vision_frame": vp.is_vision_frame,
+
+        if vp.is_vision_frame:
+            result["vision_frame_properties"] = {
+                "is_vision_frame": True,
                 "has_been_measured": vp.has_been_measured,
-            },
-            "glue_pt_frame": {
-                "is_glue_point": gp.is_glue_point,
+            }
+        if lp.is_laser_frame:
+            result["laser_frame_properties"] = {
+                "is_laser_frame": True,
+                "has_been_measured": lp.has_been_measured,
+            }
+        if gp.is_glue_point:
+            result["glue_pt_frame_properties"] = {
+                "is_glue_point": True,
                 "has_been_placed": gp.has_been_placed,
                 "has_been_cured": gp.has_been_cured,
                 "time_ms": gp.time_ms,
                 "dispense_offset_mm": gp.dispense_offset_mm,
-            },
-            "laser_frame": {
-                "is_laser_frame": lp.is_laser_frame,
-                "has_been_measured": lp.has_been_measured,
-            },
-            "gripping_frame": {
-                "is_gripping_frame": grf.is_gripping_frame,
+            }
+        if grf.is_gripping_frame:
+            result["gripping_frame_properties"] = {
+                "is_gripping_frame": True,
                 "compatible_grippers": list(grf.compatible_grippers),
                 "compatible_gripper_tips": list(grf.compatible_gripper_tips),
-            },
-            "assembly_frame": {
-                "is_assembly_frame": af.is_assembly_frame,
+            }
+        if af.is_assembly_frame:
+            result["assembly_frame_properties"] = {
+                "is_assembly_frame": True,
                 "is_target_frame": af.is_target_frame,
                 "associated_frame": af.associated_frame,
-            },
-        }
+            }
+        return result
 
     @staticmethod
     def to_dict(frame, obj_name=None, detailed=False) -> dict:
-        """Serialize a frame to a dict, optionally with full properties."""
+        """Serialize a frame to a dict with its relevant type-specific properties."""
         result = {
             "frame_name": frame.frame_name,
             "parent_frame": frame.parent_frame,
             "pose": PoseHelper.to_dict(frame.pose),
+            "properties": FrameHelper.relevant_properties(frame.properties),
         }
         if obj_name is not None:
             result["belongs_to_object"] = obj_name
-        if detailed:
-            result["properties"] = FrameHelper.detailed(frame.properties)
-        else:
-            result["properties_summary"] = FrameHelper.summary(frame.properties)
         return result
 
 

@@ -56,6 +56,7 @@ class Agent:
         self._assembly_knowledge = assembly_knowledge
 
         knowledge_tools = KnowledgeTools(service_node)
+        self._knowledge_tools = knowledge_tools
 
         # Initialize interaction log
         self.interaction_log = []
@@ -102,9 +103,7 @@ class Agent:
 
             # ── Live scene knowledge ──────────────────────────────────────────────
             assembly_knowledge.list_objects_in_scene_tool,
-            assembly_knowledge.get_object_properties_tool,
             assembly_knowledge.get_object_frames_tool,
-            assembly_knowledge.get_frame_properties_tool,
             assembly_knowledge.get_frames_in_scene_tool,
 
             # ── Efficient query tools ─────────────────────────────────────────────
@@ -144,8 +143,8 @@ class Agent:
         ]
 
         # ── Minimal tool subset for executor ────────────────────────────────────
-        # Note: list_objects_in_scene and get_object_properties are removed because
-        # the scene summary is injected automatically via pre_model_hook.
+        # Note: list_objects_in_scene is removed because the scene summary
+        # is injected automatically via pre_model_hook.
         self.executor_tools = [
             tools_instance.execute_single_action_tool,
             # tools_instance.execute_sequence_tool,  # currently not used, because the agent learns step by step
@@ -159,7 +158,6 @@ class Agent:
             knowledge_tools.query_assembly_knowledge_tool,
             knowledge_tools.record_knowledge_tool,
             assembly_knowledge.get_object_frames_tool,
-            assembly_knowledge.get_frame_properties_tool,
             assembly_knowledge.get_frames_in_scene_tool,
             assembly_knowledge.list_available_components_tool,
             assembly_knowledge.get_component_description_tool,
@@ -253,6 +251,19 @@ class Agent:
             pre_model_hook=self._pre_model_hook,
             # prompt=None: system prompts are handled in _pre_model_hook
         )
+
+    def _get_executed_services(self) -> list:
+        """Return deduplicated service client names from the current action sequence."""
+        if not self.rsap_instance:
+            return []
+        seen = set()
+        result = []
+        for action in self.rsap_instance.action_list:
+            client = getattr(action, 'client', None)
+            if client and client not in seen:
+                seen.add(client)
+                result.append(client)
+        return result
 
     def _detect_phase(self, user_message: str) -> str:
         """Detect whether this message should use the executor or planner model."""
@@ -459,22 +470,32 @@ class Agent:
                     self.current_phase = "planning"
 
                     if completed_phase == "executing":
-                        self.service_node.get_logger().info(
-                            "Post-execution learning nudge: asking agent to record discovered knowledge."
-                        )
-                        try:
-                            self.handle_user_input(
-                                "Execution completed successfully. "
-                                "For each service used that has empty preconditions, postconditions, or parameters "
-                                "in the knowledge base, fill them in now using record_knowledge: "
-                                "for parameters call get_service_parameters first, then record each parameter; "
-                                "for preconditions/postconditions infer the fact tokens from observed behavior. "
-                                "Also record any other new discoveries (constraints, lessons learned). "
-                                "If nothing is missing or new, respond with 'No new knowledge to record.'"
+                        executed_services = self._get_executed_services()
+                        if executed_services:
+                            targeted_kb = self._knowledge_tools.get_knowledge_for_services(
+                                executed_services
                             )
-                        except Exception as learn_err:
-                            self.service_node.get_logger().warning(
-                                f"Post-execution learning call failed (non-critical): {learn_err}"
+                            self.service_node.get_logger().info(
+                                f"Post-execution learning nudge for services: {executed_services}"
+                            )
+                            try:
+                                self.handle_user_input(
+                                    "Execution completed successfully. "
+                                    "Below is the current knowledge for the services that were just executed.\n\n"
+                                    f"{targeted_kb}\n\n"
+                                    "Using record_knowledge, fill any empty fields (preconditions, postconditions, "
+                                    "description) and add usage_notes from observed behavior. "
+                                    "For missing parameters, call get_service_parameters first, then record each. "
+                                    "Also reinforce confidence on confirmed behavior or note general discoveries. "
+                                    "If nothing is missing or new, respond with 'No new knowledge to record.'"
+                                )
+                            except Exception as learn_err:
+                                self.service_node.get_logger().warning(
+                                    f"Post-execution learning call failed (non-critical): {learn_err}"
+                                )
+                        else:
+                            self.service_node.get_logger().info(
+                                "Learning nudge skipped: no service clients found in sequence."
                             )
 
                     return response_text
