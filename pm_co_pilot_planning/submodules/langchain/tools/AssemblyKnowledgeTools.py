@@ -424,6 +424,7 @@ class AssemblyKnowledgeTools:
                 f"Objects: {', '.join(obj_parts)}",
                 f"Frame summary: {', '.join(frame_parts)}",
             ]
+
             return "\n".join(lines)
 
         except Exception as e:

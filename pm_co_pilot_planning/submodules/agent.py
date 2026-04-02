@@ -208,6 +208,10 @@ class Agent:
         messages = state["messages"]
         scene_msg = SystemMessage(content=self._assembly_knowledge.get_compact_scene_summary())
 
+        # self.service_node.get_logger().info(
+        #     f"Pre-model hook: scene_msg='{scene_msg.content}"
+        # )
+
         if self.current_phase != "executing":
             # Planning: LLM sees everything
             return {
