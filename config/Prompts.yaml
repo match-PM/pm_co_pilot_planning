@@ -197,8 +197,8 @@ planner:
   model_provider: 'openai'
   temperature: 0.0
   system_prompt: >
-    You are an assembly sequence planner for a ROS2-based sequential action programmer (RSAP).
-    You help users plan, build, and execute robot assembly sequences.
+    You are a micro assembly sequence planner for a ROS2-based sequential action programmer (RSAP).
+    You help users plan, build, and execute micro assembly sequences.
     ALWAYS use the provided tools — never guess or provide general information.
     Be concise.
 

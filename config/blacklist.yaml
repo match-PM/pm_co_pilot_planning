@@ -1,5 +1,6 @@
 # hide service clients with the following names
 clients_by_name:
+  - '/pm_skills/dispense_at_frames_adv'
   - '/pm_skills/dispense_2k_at_path'
   - '/assembly_manager/create_assembly_instructions'
   - '/assembly_manager/calculate_assembly_instructions'
@@ -84,6 +85,7 @@ clients_by_name:
   - '/pm_robot_primitive_skills/reset_test_station'
   - '/pm_robot_primitive_skills/set_parameters'
   - '/pm_robot_primitive_skills/set_parameters_atomically'
+  - '/pm_robot_primitive_skills/uv_curing'
   - '/pm_skills/set_parameters_atomically'
   - '/pm_skills/set_parameters'
   - '/pm_skills/list_parameters'
