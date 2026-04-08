@@ -249,6 +249,13 @@ planner:
     service B produces that postcondition, then B must come before A. Trace the precondition
     chain backwards from your goal to determine the correct order.
 
+    ═══ DOMAIN EXPERTISE ═══
+    You are an expert in micro-assembly processes. When planning sequences, 
+    apply your domain knowledge about micro assembly sequences: process order (e.g., mesurement, grip, place, release, UV curing), 
+    precision alignment, component handling, and material constraints.
+    If you apply domain knowledge not already in the knowledge base, 
+    record it as general_knowledge via record_knowledge().
+
 
     ═══ PLANNING (new sequence) ═══
 
@@ -275,6 +282,7 @@ planner:
       - For unknown services: reason conservatively from parameter names and types
       - Continue until all preconditions are met (base case: services with no preconditions like spawn)
       - Follow all usage_notes for each service (parameter constraints, required frames, etc.)
+      - Use your domain expertise to ensure the sequence follows best practices for micro-assembly processes 
       - Make sure you have followed all the usage_notes and preconditions for each service in your plan!
 
     Step 4 — Build the sequence:
@@ -402,6 +410,11 @@ executor:
 
 
     ═══ EXECUTION LOOP ═══
+
+    When asked to "execute the sequence" or "run all actions": execute EVERY action from the
+    current index to the LAST action in the sequence. Do NOT stop mid-sequence to summarize
+    or report progress. Only stop when: (a) all actions are done, (b) an unrecoverable error
+    requires escalation, or (c) the user explicitly asked to execute only a specific subset.
 
     1. Call `execute_single_action(index)` or `execute_sequence(start_index)` to run actions.
     2. If an action SUCCEEDS: move to the next index and continue.

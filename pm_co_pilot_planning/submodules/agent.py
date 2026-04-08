@@ -165,15 +165,24 @@ class Agent:
             assembly_knowledge.get_assembly_description_tool,
         ]
 
+        # ── Minimal tool subset for learning nudge ───────────────────────────
+        # Stateless: no execution tools, no sequence modification tools.
+        self._learning_tools = [
+            knowledge_tools.query_assembly_knowledge_tool,
+            knowledge_tools.record_knowledge_tool,
+            tools_instance.get_service_parameters_tool,
+        ]
+
         # ── Bind tools to each model ───────────────────────────────────────────
         # Planner gets all tools, executor gets the minimal subset
         self.planner_model = planner_config.llm.bind_tools(self.tools, parallel_tool_calls=True)
         self.executor_model = executor_config.llm.bind_tools(self.executor_tools, parallel_tool_calls=True)
+        self._learning_model = executor_config.llm.bind_tools(self._learning_tools, parallel_tool_calls=True)
 
         self.memory = MemorySaver()
         self.config = {
             "configurable": {"thread_id": thread_id},
-            "recursion_limit": 100
+            "recursion_limit": 200
         }
         self.service_node = service_node
 
@@ -264,6 +273,129 @@ class Agent:
                 seen.add(client)
                 result.append(client)
         return result
+
+    def _build_execution_summary(self, step_details: list) -> str:
+        """Extract a compact execution summary from step_details for the learning nudge.
+
+        Parses tool calls and responses to produce a structured JSON with:
+        - actions_executed: each execute_single_action result (success/fail, error, state_changes)
+        - fixes_applied: set_action_parameters calls (what was changed on which action)
+        - knowledge_already_recorded: record_knowledge calls made inline by the executor
+        """
+        action_results = []
+        fixes_applied = []
+        knowledge_recorded = []
+        seen_action_indices = set()
+
+        for step in step_details:
+            # Extract knowledge/fix calls from tool_calls (before response arrives)
+            for tc in step.get("tool_calls", []):
+                if tc["name"] == "set_action_parameters":
+                    fixes_applied.append({
+                        "action_index": tc["args"].get("index"),
+                        "parameters_changed": tc["args"].get("parameters", {}),
+                    })
+                elif tc["name"] == "record_knowledge":
+                    knowledge_recorded.append({
+                        "service": tc["args"].get("service_name", ""),
+                        "field": tc["args"].get("field", ""),
+                        "content": tc["args"].get("content", ""),
+                    })
+
+            # Helper to parse an execute result dict into a summary entry
+            def _parse_execute_result(data):
+                idx = data.get("index")
+                if idx in seen_action_indices:
+                    return None
+                seen_action_indices.add(idx)
+                entry = {
+                    "index": idx,
+                    "action_name": data.get("action_name"),
+                    "success": data.get("success"),
+                    "service_client": data.get("service_client", ""),
+                }
+                if not data.get("success"):
+                    response = data.get("response", {})
+                    entry["error"] = (
+                        response.get("message") if isinstance(response, dict)
+                        else data.get("message", "")
+                    )
+                if data.get("state_changes"):
+                    entry["state_changes"] = data["state_changes"]
+                return entry
+
+            # Single tool response (content on the step itself)
+            if step.get("type") == "ToolMessage":
+                try:
+                    data = json.loads(step.get("content", ""))
+                    if "action_name" in data and "success" in data:
+                        entry = _parse_execute_result(data)
+                        if entry:
+                            action_results.append(entry)
+                except (json.JSONDecodeError, TypeError):
+                    pass
+
+            # Parallel tool responses (stored under tool_responses key)
+            for resp in step.get("tool_responses", []):
+                try:
+                    data = json.loads(resp.get("content", ""))
+                    if "action_name" in data and "success" in data:
+                        entry = _parse_execute_result(data)
+                        if entry:
+                            action_results.append(entry)
+                except (json.JSONDecodeError, TypeError):
+                    pass
+
+        return json.dumps(
+            {
+                "actions_executed": action_results,
+                "fixes_applied": fixes_applied,
+                "knowledge_already_recorded": knowledge_recorded,
+            },
+            indent=2,
+        )
+
+    def _run_learning_nudge(self, targeted_kb: str, execution_summary: str) -> str:
+        """Run a stateless learning agent to record knowledge from execution observations.
+
+        Uses a separate agent instance with no shared memory and no execution tools,
+        so it cannot call execute_single_action or trigger recursive nudges.
+        """
+        learning_agent = create_react_agent(
+            model=self._learning_model,
+            tools=self._learning_tools,
+            # No checkpointer = fully stateless, isolated from main agent memory
+        )
+
+        prompt = (
+            "You are a knowledge recorder. Your job is to record service knowledge "
+            "from execution observations into the knowledge base.\n"
+            "Use PARALLEL tool calls to record multiple fields at once.\n"
+            "Only record truly NEW or MISSING information — skip fields that already have correct entries.\n"
+            "Review 'knowledge_already_recorded' below: correct any entries that are wrong or incomplete "
+            "by re-recording them with the right content. Skip entries that are already correct.\n"
+            "If nothing is missing, wrong, or new, respond with 'No new knowledge to record.'\n\n"
+            f"Current knowledge base state:\n{targeted_kb}\n\n"
+            f"Execution summary (what actually happened during this run):\n{execution_summary}\n\n"
+            "Instructions:\n"
+            "- Use the execution summary to understand what services ran, what failed, "
+            "what fixes were applied, and what state changes occurred.\n"
+            "- For services with 'not_in_kb: true': call get_service_parameters first, "
+            "then record each parameter.\n"
+            "- For failed actions: record the error cause as a usage_note on that service.\n"
+            "- For successful fixes (fixes_applied): record the fix as a usage_note.\n"
+            "- For state_changes from successful actions: use them to infer postconditions.\n"
+            "- For services with empty preconditions: infer from the execution order "
+            "which services had to succeed first.\n"
+            "- Do NOT call any execution or sequence tools. "
+            "Only use record_knowledge, query_assembly_knowledge, and get_service_parameters."
+        )
+
+        result = learning_agent.invoke(
+            {"messages": [HumanMessage(content=prompt)]},
+            {"recursion_limit": 80},
+        )
+        return result["messages"][-1].content
 
     def _detect_phase(self, user_message: str) -> str:
         """Detect whether this message should use the executor or planner model."""
@@ -475,19 +607,14 @@ class Agent:
                             targeted_kb = self._knowledge_tools.get_knowledge_for_services(
                                 executed_services
                             )
+                            execution_summary = self._build_execution_summary(step_details)
                             self.service_node.get_logger().info(
                                 f"Post-execution learning nudge for services: {executed_services}"
                             )
                             try:
-                                self.handle_user_input(
-                                    "Execution completed successfully. "
-                                    "Below is the current knowledge for the services that were just executed.\n\n"
-                                    f"{targeted_kb}\n\n"
-                                    "Using record_knowledge, fill any empty fields (preconditions, postconditions, "
-                                    "description) and add usage_notes from observed behavior. "
-                                    "For missing parameters, call get_service_parameters first, then record each. "
-                                    "Also reinforce confidence on confirmed behavior or note general discoveries. "
-                                    "If nothing is missing or new, respond with 'No new knowledge to record.'"
+                                learning_result = self._run_learning_nudge(targeted_kb, execution_summary)
+                                self.service_node.get_logger().info(
+                                    f"Learning nudge completed: {learning_result[:200]}"
                                 )
                             except Exception as learn_err:
                                 self.service_node.get_logger().warning(
