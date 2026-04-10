@@ -78,6 +78,7 @@ class Agent:
         self.current_phase = "planning"  # "planning" | "executing" | "escalated"
         self.consecutive_exec_failures = 0  # track execution failures for auto-escalate
         self.stop_requested = False  # set to True to abort agent loop on app close
+        self._full_execution_requested = False  # True when user asked for full sequence execution
 
 
         # ── System prompts (injected via pre_model_hook) ────────────────────────
@@ -93,7 +94,6 @@ class Agent:
             # ── Domain knowledge (use first to retrieve learned rules) ───────────
             knowledge_tools.query_assembly_knowledge_tool,
             # knowledge_tools.get_similar_assembly_example_tool,
-            knowledge_tools.record_knowledge_tool,
 
             # ── Assembly knowledge (use when planning a new sequence) ────────────
             assembly_knowledge.list_available_components_tool,
@@ -147,7 +147,7 @@ class Agent:
         # is injected automatically via pre_model_hook.
         self.executor_tools = [
             tools_instance.execute_single_action_tool,
-            # tools_instance.execute_sequence_tool,  # currently not used, because the agent learns step by step
+            # tools_instance.execute_sequence_tool,  
             tools_instance.get_action_at_index_tool,
             tools_instance.get_action_parameters_tool,
             tools_instance.set_action_parameters_tool,
@@ -274,10 +274,11 @@ class Agent:
                 result.append(client)
         return result
 
-    def _build_execution_summary(self, step_details: list) -> str:
-        """Extract a compact execution summary from step_details for the learning nudge.
+    def _build_execution_summary(self) -> str:
+        """Extract a compact execution summary from all execution-phase interactions.
 
-        Parses tool calls and responses to produce a structured JSON with:
+        Reads from self.interaction_log to capture step_details across ALL continuations,
+        not just the last one. Parses tool calls and responses to produce a structured JSON with:
         - actions_executed: each execute_single_action result (success/fail, error, state_changes)
         - fixes_applied: set_action_parameters calls (what was changed on which action)
         - knowledge_already_recorded: record_knowledge calls made inline by the executor
@@ -285,9 +286,24 @@ class Agent:
         action_results = []
         fixes_applied = []
         knowledge_recorded = []
-        seen_action_indices = set()
+        # Track (index, success) pairs so both a failure AND its successful retry are kept.
+        seen_action_keys = set()
 
-        for step in step_details:
+        # Collect step_details from ALL execution/escalated interactions.
+        all_steps = []
+        exec_interaction_count = 0
+        for interaction in self.interaction_log:
+            if interaction.get("phase") in ("executing", "escalated"):
+                all_steps.extend(interaction.get("step_details", []))
+                exec_interaction_count += 1
+
+        # self.service_node.get_logger().info(
+        #     "Building execution summary from %d steps across %d execution interactions",
+        #     len(all_steps),
+        #     exec_interaction_count,
+        # )
+
+        for step in all_steps:
             # Extract knowledge/fix calls from tool_calls (before response arrives)
             for tc in step.get("tool_calls", []):
                 if tc["name"] == "set_action_parameters":
@@ -305,9 +321,10 @@ class Agent:
             # Helper to parse an execute result dict into a summary entry
             def _parse_execute_result(data):
                 idx = data.get("index")
-                if idx in seen_action_indices:
+                key = (idx, data.get("success"))
+                if key in seen_action_keys:
                     return None
-                seen_action_indices.add(idx)
+                seen_action_keys.add(key)
                 entry = {
                     "index": idx,
                     "action_name": data.get("action_name"),
@@ -387,6 +404,9 @@ class Agent:
             "- For state_changes from successful actions: use them to infer postconditions.\n"
             "- For services with empty preconditions: infer from the execution order "
             "which services had to succeed first.\n"
+            "- For actions that appear unnecessary or redundant (e.g., a fix was applied to the same "
+            "parameter on multiple actions of the same service type): record an optimization note as a "
+            "usage_note on the relevant service so future plans avoid the mistake.\n"
             "- Do NOT call any execution or sequence tools. "
             "Only use record_knowledge, query_assembly_knowledge, and get_service_parameters."
         )
@@ -404,17 +424,23 @@ class Agent:
             return "executing"
         return "planning"
 
-    def handle_user_input(self, user_message: str) -> str:
+    def handle_user_input(self, user_message: str, _is_internal_continuation: bool = False) -> str:
         """
         Non-streaming approach (returns final string) with debug logging and token tracking.
         Automatically selects planner vs executor model based on user intent.
+
+        _is_internal_continuation: when True, skip phase re-detection so that auto-continuation
+        and escalation calls preserve the phase that was explicitly set by the caller.
         """
-        # Detect phase from user message (unless already escalated)
-        if self.current_phase != "escalated":
+        # Detect phase from user message (unless already escalated or internal continuation)
+        if not _is_internal_continuation and self.current_phase != "escalated":
             new_phase = self._detect_phase(user_message)
             if new_phase != "executing" and self.current_phase == "executing":
                 # if switching out of execution, reset failure counter
                 self.consecutive_exec_failures = 0
+            # Track full-execution intent only on initial user request (not continuations)
+            if new_phase == "executing" and self.current_phase != "executing":
+                self._full_execution_requested = True
             self.current_phase = new_phase
 
         phase_model = self.model_configs.get(self.current_phase, {}).get("name", "unknown")
@@ -594,12 +620,50 @@ class Agent:
                             f"The execution monitor could not resolve this error and escalated to you.\n"
                             f"Recent response: {response_text}\n"
                             f"Please diagnose the root cause using query_assembly_knowledge and fix the sequence. "
-                            f"After fixing, continue execution from the failed action."
+                            f"After fixing, continue execution from the failed action.",
+                            _is_internal_continuation=True,
                         )
+
+                    # ── Auto-continuation: executor stopped mid-sequence ────
+                    if self.current_phase == "executing" and self._full_execution_requested:
+                        total = len(self.rsap_instance.action_list) if self.rsap_instance else 0
+                        # Determine last successfully executed index from step_details.
+                        # Do NOT use rsap.get_current_action_index() — execute_single_action
+                        # calls set_current_action(index) which leaves it pointing at the
+                        # last executed action, not the next one.
+                        last_executed = 0
+                        for _step in step_details:
+                            if _step.get("type") == "ToolMessage":
+                                try:
+                                    _d = json.loads(_step.get("content", ""))
+                                    if _d.get("success") and "index" in _d and "action_name" in _d:
+                                        last_executed = max(last_executed, int(_d["index"]))
+                                except (json.JSONDecodeError, TypeError, ValueError):
+                                    pass
+                            for _resp in _step.get("tool_responses", []):
+                                try:
+                                    _d = json.loads(_resp.get("content", ""))
+                                    if _d.get("success") and "index" in _d and "action_name" in _d:
+                                        last_executed = max(last_executed, int(_d["index"]))
+                                except (json.JSONDecodeError, TypeError, ValueError):
+                                    pass
+                        next_idx = last_executed + 1
+                        if total > 0 and next_idx <= total:
+                            self.service_node.get_logger().info(
+                                f"Executor stopped after action {last_executed}/{total}, "
+                                f"auto-continuing from action {next_idx}..."
+                            )
+                            return self.handle_user_input(
+                                f"Continue executing the sequence from action {next_idx}. "
+                                f"There are {total - next_idx + 1} actions remaining "
+                                f"(actions {next_idx} to {total}).",
+                                _is_internal_continuation=True,
+                            )
 
                     # ── Post-execution learning nudge ───────────────────────
                     completed_phase = self.current_phase
                     self.current_phase = "planning"
+                    self._full_execution_requested = False
 
                     if completed_phase == "executing":
                         executed_services = self._get_executed_services()
@@ -607,15 +671,29 @@ class Agent:
                             targeted_kb = self._knowledge_tools.get_knowledge_for_services(
                                 executed_services
                             )
-                            execution_summary = self._build_execution_summary(step_details)
+                            execution_summary = self._build_execution_summary()
                             self.service_node.get_logger().info(
                                 f"Post-execution learning nudge for services: {executed_services}"
                             )
                             try:
+                                learning_start = datetime.now()
                                 learning_result = self._run_learning_nudge(targeted_kb, execution_summary)
+                                learning_end = datetime.now()
                                 self.service_node.get_logger().info(
                                     f"Learning nudge completed: {learning_result[:200]}"
                                 )
+                                self.interaction_log.append({
+                                    "timestamp": learning_start.isoformat(),
+                                    "timestamp_end": learning_end.isoformat(),
+                                    "execution_time_seconds": (learning_end - learning_start).total_seconds(),
+                                    "user_message": "[post-execution learning nudge]",
+                                    "agent_response": learning_result,
+                                    "phase": "learning",
+                                    "model": self.model_configs.get("executing", {}).get("name", "unknown"),
+                                    "steps": 0,
+                                    "step_details": [],
+                                    "tokens": {"input": 0, "output": 0, "total": 0},
+                                })
                             except Exception as learn_err:
                                 self.service_node.get_logger().warning(
                                     f"Post-execution learning call failed (non-critical): {learn_err}"

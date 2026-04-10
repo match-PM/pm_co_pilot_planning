@@ -287,7 +287,7 @@ class ActionHelper:
         return info
 
     @staticmethod
-    def extract_error(action) -> dict:
+    def extract_srv_response(action) -> dict:
         """Extract error details from a failed action's log entry and response."""
         details = {}
         log_entry = action.get_log_entry() if hasattr(action, 'get_log_entry') else {}
@@ -295,7 +295,7 @@ class ActionHelper:
             if log_entry.get("service_client"):
                 details["service_client"] = log_entry["service_client"]
             if log_entry.get("message"):
-                details["error_message"] = log_entry["message"]
+                details["message"] = log_entry["message"]
         if hasattr(action, 'response_dict') and action.response_dict:
             response = dict(action.response_dict)
             if "Error" in response:

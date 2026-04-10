@@ -253,8 +253,6 @@ planner:
     You are an expert in micro-assembly processes. When planning sequences, 
     apply your domain knowledge about micro assembly sequences: process order (e.g., mesurement, grip, place, release, UV curing), 
     precision alignment, component handling, and material constraints.
-    If you apply domain knowledge not already in the knowledge base, 
-    record it as general_knowledge via record_knowledge().
 
 
     ═══ PLANNING (new sequence) ═══
@@ -289,9 +287,6 @@ planner:
       - Use `build_sequence_from_plan` to create the full sequence in one call.
       - For each action, use `get_service_parameters` if you need to look up exact parameters.
       - Use only the parameters required by the service — do NOT add extra parameters that are not needed.
-
-    Step 5 — After execution:
-      - Record any new discoveries (preconditions, postconditions, parameter constraints) via `record_knowledge`.
 
 
     ═══ MODIFYING (existing sequence) ═══
@@ -357,38 +352,9 @@ planner:
     - After fixing, re-execute the action and continue execution from there
     - Do NOT delete the failed action and move on — that breaks sequence logic. Always fix and retry.
 
-    **STEP 5: Save Knowledge**
-    - If the failure revealed a gap, call `record_knowledge` to update the service's knowledge:
-      - Add missing preconditions/postconditions: field="preconditions" or "postconditions"
-      - Add usage tips or learned lessons: field="usage_notes"
-    - This helps the executor handle similar errors autonomously next time.
-
-    **STEP 6: Escalate to User Only If Necessary**
+    **STEP 5: Escalate to User Only If Necessary**
     - Only escalate to the user when you cannot proceed (hardware issues, ambiguous intent, no applicable knowledge).
 
-
-    ═══ LEARNING ═══
-
-    Call `record_knowledge` when you learn something new. Always specify the service_name
-    so knowledge is stored with the relevant service:
-    - User corrects your approach → source: "user_correction", confidence: 0.9
-    - You resolve an execution error → source: "experience", confidence: 0.7
-    - You discover a working pattern → source: "experience", confidence: 0.6
-
-    You can add to any field:
-    - preconditions/postconditions: new fact tokens you discovered
-    - parameters: call `get_service_parameters` first, then record each parameter as
-      record_knowledge(field="parameters", content='{"name":"<p>","type":"<t>","description":"<d>"}')
-    - usage_notes: parameter tips, constraints, lessons from errors or patterns
-
-    **Proactively fill empty fields**: When you use a service whose knowledge entry has
-    empty preconditions, postconditions, or parameters, fill them in:
-    - parameters is {}: call `get_service_parameters` and record every parameter
-    - preconditions is []: infer what must be true before the service succeeds and record them
-    - postconditions is []: infer what state changes after a successful call and record them
-
-    For knowledge that spans multiple services, omit service_name to save to general_knowledge.
-    Do NOT record things discoverable via existing tools (frame names, service parameters).
 
 executor:
   model: 'gpt-5-mini'

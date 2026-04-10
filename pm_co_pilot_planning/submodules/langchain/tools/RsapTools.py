@@ -624,7 +624,7 @@ class RsapTools:
                 failed_action = self.rsap.get_action_at_index(final_index)
                 if failed_action:
                     result["failed_action_name"] = failed_action.get_name() if hasattr(failed_action, 'get_name') else str(failed_action)
-                    result.update(ActionHelper.extract_error(failed_action))
+                    result.update(ActionHelper.extract_srv_response(failed_action))
 
             return json.dumps(result)
 
@@ -697,7 +697,7 @@ class RsapTools:
                 "success": success,
                 "index": user_index,
                 "action_name": self.rsap.get_current_action_name(),
-                "message": "Action executed successfully" if success else "Action execution failed"
+                "message": ActionHelper.extract_srv_response(self.rsap.get_action_at_index(internal_index))
             }
 
             # Snapshot after and report state changes
@@ -712,7 +712,7 @@ class RsapTools:
 
             if not success:
                 action = self.rsap.get_action_at_index(internal_index)
-                result.update(ActionHelper.extract_error(action))
+                result.update(ActionHelper.extract_srv_response(action))
 
             return json.dumps(result)
 
