@@ -193,8 +193,8 @@ agent:
     Do NOT record things discoverable via existing tools (frame names, service parameters).
 
 planner:
-  model: 'gpt-5.2'
-  model_provider: 'openai'
+  model: 'claude-sonnet-4-6'
+  model_provider: 'anthropic'
   temperature: 0.0
   system_prompt: >
     You are a micro assembly sequence planner for a ROS2-based sequential action programmer (RSAP).
