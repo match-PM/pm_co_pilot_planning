@@ -12,7 +12,7 @@ import tempfile
 from openai import OpenAI
 
 from PyQt6.QtGui import QCursor, QIcon, QAction, QFont, QPalette, QColor, QTextCursor, QTextBlockFormat, QTextCharFormat, QFontMetrics
-from PyQt6.QtWidgets import QComboBox, QSizePolicy, QLabel, QWidgetAction, QMenuBar, QDialog, QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QTextEdit, QPushButton, QStyleFactory
+from PyQt6.QtWidgets import QCheckBox, QComboBox, QSizePolicy, QLabel, QWidgetAction, QMenuBar, QDialog, QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QTextEdit, QPushButton, QStyleFactory
 from PyQt6.QtCore import Qt, QEvent, QObject, pyqtSignal, QThread, QSize, QRect, QPoint, pyqtSlot
 
 from pm_co_pilot_planning.submodules.agent import Agent
@@ -223,6 +223,12 @@ class PmCoPilotPlanningApp(QMainWindow):
         # Create agent with shared RSAP instance
         self.agent = Agent(service_node=service_node, thread_id="thread_1", rsap_instance=rsap_instance)
 
+        # Sync initial checkbox state to agent, then connect for future changes
+        self.agent.record_knowledge = self.record_knowledge_checkbox.isChecked()
+        self.record_knowledge_checkbox.stateChanged.connect(
+            lambda state: setattr(self.agent, "record_knowledge", bool(state))
+        )
+
         self.update_status_display("Assistant initialized and ready for your input!")
 
 
@@ -257,6 +263,12 @@ class PmCoPilotPlanningApp(QMainWindow):
         self.status_label = QLabel("Status: Ready")
         self.status_label.setFont(QFont("Helvetica", 12))
         self.layout.addWidget(self.status_label)
+
+        # Knowledge recording toggle
+        self.record_knowledge_checkbox = QCheckBox("Record Knowledge")
+        self.record_knowledge_checkbox.setFont(QFont("Helvetica", 12))
+        self.record_knowledge_checkbox.setChecked(False)
+        self.layout.addWidget(self.record_knowledge_checkbox)
 
         # Add a text edit for typing messages
         self.message_input = QTextEdit()
@@ -327,6 +339,9 @@ class PmCoPilotPlanningApp(QMainWindow):
                 background-color: #3e3e3e;
             }
             QLabel {
+                color: #ffffff;
+            }
+            QCheckBox {
                 color: #ffffff;
             }
         """

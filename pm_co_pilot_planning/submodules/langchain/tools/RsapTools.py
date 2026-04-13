@@ -696,8 +696,7 @@ class RsapTools:
             result = {
                 "success": success,
                 "index": user_index,
-                "action_name": self.rsap.get_current_action_name(),
-                "message": ActionHelper.extract_srv_response(self.rsap.get_action_at_index(internal_index))
+                "message": ActionHelper.extract_srv_response(self.rsap.get_action_at_index((internal_index-1)))
             }
 
             # Snapshot after and report state changes
@@ -711,7 +710,7 @@ class RsapTools:
             # result["current_scene_state"] = self._assembly_knowledge._get_scene_snapshot()
 
             if not success:
-                action = self.rsap.get_action_at_index(internal_index)
+                action = self.rsap.get_action_at_index(internal_index-1)
                 result.update(ActionHelper.extract_srv_response(action))
 
             return json.dumps(result)
