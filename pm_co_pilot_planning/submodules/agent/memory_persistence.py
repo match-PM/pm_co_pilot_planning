@@ -22,8 +22,13 @@ class MemoryPersistence:
             self._service_node.get_logger().info("No interactions to save")
             return
 
+        sequence_name = None
         if rsap_instance and hasattr(rsap_instance, "rsap_file_manager"):
             folder_path = rsap_instance.rsap_file_manager.get_folder_path()
+            try:
+                sequence_name = rsap_instance.rsap_file_manager.get_sequence_name()
+            except Exception as e:
+                self._service_node.get_logger().warning(f"Could not get sequence name: {e}")
         else:
             folder_path = "/home/match-pm/Desktop"
 
@@ -61,6 +66,7 @@ class MemoryPersistence:
             "models": model_configs,
             "task_success": task_success,
             "comment": comment,
+            "sequence_name": sequence_name,
             "session_start": interaction_log[0]["timestamp"] if interaction_log else None,
             "session_end": datetime.now().isoformat(),
             "summary": {

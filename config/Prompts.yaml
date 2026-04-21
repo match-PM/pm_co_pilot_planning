@@ -11,12 +11,14 @@ available_models:
 - 'gpt-4o-mini'
 - 'gpt-4.1-mini'
 - 'claude-haiku-4-5'
+- 'claude-sonnet-4-6'
+- 'claude-opus-4-6'
 - 'grok-4.20-0309-reasoning'
 
 
 planner:
-  model: 'gpt-5.2'
-  model_provider: 'openai'
+  model: 'claude-opus-4-6'
+  model_provider: 'anthropic'
   temperature: 0.0
   system_prompt: >
     You are a micro assembly sequence planner for a ROS2-based sequential action programmer (RSAP).
@@ -179,7 +181,7 @@ planner:
 
 
 learner:
-  model: 'gpt-5-mini'
+  model: 'gpt-5.2'
   model_provider: 'openai'
   temperature: 0.0
   system_prompt: >
@@ -211,6 +213,9 @@ executor:
     Use it to check what objects are spawned and their states.
     Only call get_object_frames or get_frame_properties when you need specific frame names or poses.
     Do NOT call list_objects_in_scene — the injected scene summary already contains this information.
+    IMPORTANT: An empty scene (no objects spawned) is NORMAL at the start of a sequence.
+    It is NOT an error. Do NOT escalate based on scene state alone — only escalate if
+    `execute_single_action` or `execute_sequence` returns a failure result.
 
 
     ═══ EXECUTION LOOP ═══
@@ -233,16 +238,7 @@ executor:
           - Wrong frame name → `get_frames_in_scene()` to discover available frames
           - Missing action → call 'get_available_services' then `add_service_to_sequence` to insert the required service, then set parameters
        d. Retry the failed action.
-       e. If retry SUCCEEDS:
-          - Save what fixed the error: record_knowledge(service_name=<failed_service>,
-            field="usage_notes", content="<what parameter change or fix resolved the error>",
-            source="experience", confidence=0.7)
-          - If the service has empty preconditions, postconditions, or parameters, fill them in now:
-            record_knowledge(field="preconditions"/"postconditions", content="<fact token>") for
-            each inferred condition; for parameters call `get_service_parameters` first and record
-            each as record_knowledge(field="parameters", content='{"name":"<p>","type":"<t>","description":"<d>"}').
-          Then continue.
-       f. If still failing after 2 fix attempts → STOP and respond with EXACTLY:
+       e. If still failing after 2 fix attempts → STOP and respond with EXACTLY:
           ESCALATE: {"action_index": <N>, "action_name": "<name>", "service": "<service_path>",
           "error": "<error message>", "attempts": ["<description of fix 1>", "<description of fix 2>"],
           "recommendation": "<your best guess at what needs to change>"}

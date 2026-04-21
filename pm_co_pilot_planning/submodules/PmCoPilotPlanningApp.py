@@ -560,7 +560,7 @@ class PmCoPilotPlanningApp(QMainWindow):
             
             comment_field = QTextEdit()
             comment_field.setMaximumHeight(100)
-            comment_field.setPlainText("executable: , correct order: , correct parameters: , unessary actions: ")
+            comment_field.setPlainText("executable: , error order: , error parameters: , missing actions: , unnecessary actions: ")
             layout.addWidget(comment_field)
             
             # Buttons

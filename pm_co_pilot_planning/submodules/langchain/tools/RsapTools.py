@@ -703,7 +703,7 @@ class RsapTools:
             result = {
                 "success": success,
                 "index": user_index,
-                "message": ActionHelper.extract_srv_response(self.rsap.get_action_at_index((internal_index-1)))
+                "message": ActionHelper.extract_srv_response(self.rsap.get_action_at_index((internal_index)))
             }
 
             # Snapshot after and report state changes
