@@ -123,6 +123,10 @@ class RsapTools:
         # Add lock for sequence modification operations
         self._sequence_lock = threading.Lock()
 
+        # Tracks the highest 1-based user index successfully executed in the current session.
+        # Reset by the orchestrator at the start of each new "execute" request.
+        self.last_executed_user_index: int = 0
+
         # Define all tools
         self.get_available_services_tool = StructuredTool.from_function(
             func=self._get_available_services,
@@ -693,6 +697,9 @@ class RsapTools:
             self.rsap.set_current_action(internal_index)
             success = self.rsap.execute_current_action()
 
+            if success:
+                self.last_executed_user_index = max(self.last_executed_user_index, user_index)
+
             result = {
                 "success": success,
                 "index": user_index,
@@ -710,7 +717,7 @@ class RsapTools:
             # result["current_scene_state"] = self._assembly_knowledge._get_scene_snapshot()
 
             if not success:
-                action = self.rsap.get_action_at_index(internal_index-1)
+                action = self.rsap.get_action_at_index(internal_index)
                 result.update(ActionHelper.extract_srv_response(action))
 
             return json.dumps(result)

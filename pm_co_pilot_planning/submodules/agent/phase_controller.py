@@ -1,8 +1,8 @@
-import json
 from dataclasses import dataclass
 from typing import Optional
 
 _EXECUTE_KEYWORDS = ["execute", "run the sequence", "run it", "start execution", "run all"]
+_FULL_SEQUENCE_KEYWORDS = ["run the sequence", "run all", "start execution", "execute all", "run everything", "execute the sequence", "execute the whole"]
 
 
 @dataclass
@@ -30,7 +30,7 @@ class PhaseController:
         if new_phase != "executing" and self.current_phase == "executing":
             self.consecutive_exec_failures = 0
         if new_phase == "executing" and self.current_phase != "executing":
-            self.full_execution_requested = True
+            self.full_execution_requested = self._is_full_sequence_request(user_message)
         self.current_phase = new_phase
 
     def mark_escalated(self):
@@ -61,11 +61,12 @@ class PhaseController:
     def decide_next(
         self,
         response_text: str,
-        step_details: list,
         total_actions: int,
+        last_executed_index: int = 0,
     ) -> NextAction:
         """
         Decide what to do after an interaction completes.
+        last_executed_index: highest 1-based user index successfully executed this session.
         Returns NextAction with kind "escalate", "continue", or "done".
         """
         # Escalation takes priority over continuation
@@ -82,8 +83,7 @@ class PhaseController:
 
         # Auto-continuation: executor stopped mid-sequence
         if self.current_phase == "executing" and self.full_execution_requested:
-            last_executed = _find_last_executed_index(step_details)
-            next_idx = last_executed + 1
+            next_idx = last_executed_index + 1
             if total_actions > 0 and next_idx <= total_actions:
                 return NextAction(
                     kind="continue",
@@ -98,28 +98,10 @@ class PhaseController:
 
     # ── Internal helpers ────────────────────────────────────────────────────
 
+    def _is_full_sequence_request(self, user_message: str) -> bool:
+        return any(kw in user_message.lower() for kw in _FULL_SEQUENCE_KEYWORDS)
+
     def _detect_phase(self, user_message: str) -> str:
         if any(kw in user_message.lower() for kw in _EXECUTE_KEYWORDS):
             return "executing"
         return "planning"
-
-
-def _find_last_executed_index(step_details: list) -> int:
-    """Return the highest successfully executed action index from step_details."""
-    last = 0
-    for step in step_details:
-        if step.get("type") == "ToolMessage":
-            try:
-                d = json.loads(step.get("content", ""))
-                if d.get("success") and "index" in d and "action_name" in d:
-                    last = max(last, int(d["index"]))
-            except (json.JSONDecodeError, TypeError, ValueError):
-                pass
-        for resp in step.get("tool_responses", []):
-            try:
-                d = json.loads(resp.get("content", ""))
-                if d.get("success") and "index" in d and "action_name" in d:
-                    last = max(last, int(d["index"]))
-            except (json.JSONDecodeError, TypeError, ValueError):
-                pass
-    return last

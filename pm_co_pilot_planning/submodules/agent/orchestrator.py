@@ -39,6 +39,8 @@ class Agent:
             tools_instance = RsapTools(service_node, assembly_knowledge=assembly_knowledge)
             self.rsap_instance = None
 
+        self._tools_instance = tools_instance
+
         knowledge_tools = KnowledgeTools(service_node)
 
         # ── Model configs ──────────────────────────────────────────────────
@@ -180,6 +182,8 @@ class Agent:
           4. After loop: run learning nudge if any execution occurred
         """
         self._phase.set_from_message(user_message)
+        if self._phase.current_phase == "executing":
+            self._tools_instance.last_executed_user_index = 0
         session_had_execution = False
         pending = user_message
         final_response = ""
@@ -225,10 +229,16 @@ class Agent:
 
             # Let PhaseController decide what to do next
             total_actions = len(self.rsap_instance.action_list) if self.rsap_instance else 0
+            self.service_node.get_logger().info(
+                f"decide_next inputs: total_actions={total_actions}, "
+                f"last_executed_index={self._tools_instance.last_executed_user_index}, "
+                f"full_execution_requested={self._phase.full_execution_requested}, "
+                f"phase={self._phase.current_phase}"
+            )
             decision = self._phase.decide_next(
                 response_text=result.response_text,
-                step_details=ctx.step_details,
                 total_actions=total_actions,
+                last_executed_index=self._tools_instance.last_executed_user_index,
             )
 
             if decision.kind == "escalate":

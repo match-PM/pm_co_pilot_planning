@@ -5,12 +5,13 @@ submodules = 'pm_co_pilot_planning/submodules'
 files = 'files'
 langchain = 'pm_co_pilot_planning/submodules/langchain'
 tools = 'pm_co_pilot_planning/submodules/langchain/tools'
+agent = 'pm_co_pilot_planning/submodules/agent'
 
 setup(
     name=package_name,
     version='0.0.0',
     # packages=find_packages(exclude=['test']),
-    packages=(package_name, submodules, tools, files, langchain),
+    packages=(package_name, submodules, tools, files, langchain, agent),
     data_files=[
         ('share/ament_index/resource_index/packages',
             ['resource/' + package_name]),
