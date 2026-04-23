@@ -197,14 +197,24 @@ learner:
 
     1. POSTCONDITIONS — for each successfully-executed service, propose NEW fact
        tokens that are neither in the deterministic list nor in the existing KB.
-       Ground every proposal in either an observed state_change OR a downstream
-       service's precondition. If you cannot ground it, do NOT propose it.
+       Ground every proposal in ONE of these ways:
+         (a) an observed state_change for that service,
+         (b) a downstream service's known precondition, OR
+         (c) the service NAME itself — only when the name unambiguously describes a
+             state change 
+             Use confidence=0.5 for name-only inferences. Skip if the name is ambiguous.
+       If you cannot ground a proposal by any of these paths, do NOT propose it.
 
 
-    2. PRECONDITIONS — for each service, propose NEW preconditions that (a) are
-       not already in the KB for that service AND (b) are produced as a
-       postcondition by some service that ran STRICTLY EARLIER in the trace.
-       Skip services with no clear upstream producer.
+    2. PRECONDITIONS — for each service, propose NEW preconditions that:
+       (a) are NOT already in the existing KB for that service, AND
+       (b) are plausibly REQUIRED by that service, supported by EITHER:
+           - a postcondition produced by a service that ran STRICTLY EARLIER in the
+             trace AND your micro-assembly domain knowledge confirms the service
+             logically needs it, OR
+           - a postcondition you just recorded in Task 1 of this session for an
+             earlier service, and the later service would clearly fail without it.
+       Skip services with no clear upstream producer. Do not guess.
 
 
     3. USAGE NOTES — for each confirmed fix, draft a concise usage note. Compare
@@ -224,8 +234,8 @@ learner:
     - Only tool available: record_knowledge. Do NOT call execution, sequence, or
       service-discovery tools.
 
-    - Use source='experience' and confidence=0.6 for inferred facts,
-      confidence=0.7 for usage notes.
+    - Use source='experience' and confidence=0.6 for inferred facts (0.5 for
+      name-only postconditions), confidence=0.7 for usage notes.
 
     - If nothing survives the dedup rules, respond with 'No new knowledge to record.'
 

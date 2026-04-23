@@ -15,7 +15,7 @@ STATE_CHANGE_MAP = [
     (r"\.vision_frame_properties\.has_been_measured changed to True$",
      "frame:{frame_name}:vision_corrected", 0.8),
     (r"\.laser_frame_properties\.has_been_measured changed to True$",
-     "frame:{frame_name}:laser_measured", 0.8),
+     "frame:{frame_name}:laser_corrected", 0.8),
     (r"\.is_gripped changed to True$",
      "component:{component_name}:gripped", 0.8),
     (r"\.is_assembled changed to True$",
@@ -233,13 +233,22 @@ class LearningManager:
             f"{json.dumps(fixes_applied, indent=2)}\n\n"
             "TASK:\n"
             "1. POSTCONDITIONS — for each service in the trace, propose NEW postcondition "
-            "fact tokens that are NOT in the deterministic list AND NOT in the existing "
-            "postconditions. Ground each proposal in either an observed state_change OR "
-            "a downstream service's precondition. If you cannot ground it, DO NOT propose it.\n"
+            "fact tokens NOT in the deterministic list AND NOT in the existing postconditions. "
+            "Ground each proposal in ONE of: (a) an observed state_change, "
+            "(b) a downstream service's precondition, OR "
+            "(c) the service name itself — ONLY when it unambiguously describes a state change "
+            "(e.g. 'move_uv_in_curing_position' → uv_head:in_curing_position, "
+            "'release_component' → component:{component_name}:released). "
+            "Use confidence=0.5 for name-only inferences. Skip if the name is ambiguous.\n"
             "2. PRECONDITIONS — for each service, propose NEW preconditions that (a) are "
-            "NOT in the existing preconditions for that service AND (b) ARE produced as "
-            "a postcondition by some service that ran STRICTLY EARLIER in the trace. "
-            "Skip services with no clear upstream producer.\n"
+            "NOT already in that service's existing preconditions AND (b) are plausibly "
+            "REQUIRED by the service, supported by EITHER: a postcondition of a strictly "
+            "earlier service that your micro-assembly domain knowledge confirms the service "
+            "needs, OR a postcondition you just recorded in Task 1 of this session for an "
+            "earlier service. Typical assembly chain: spawn → vision_correct → gonio_align "
+            "→ force_grip → place → dispense → move_uv → uv_cure → release. "
+            "In a physical assembly sequence, execution order IS the dependency structure — "
+            "use this to validate inferences. Skip services with no clear upstream producer.\n"
             "3. USAGE NOTES — for each fix in CONFIRMED FIXES, draft a concise note. "
             "Compare it SEMANTICALLY against every existing usage_note for that service; "
             "if any existing note already covers the same constraint (even with different "
@@ -248,7 +257,8 @@ class LearningManager:
             "frame:{frame_name}:<state>. Never put a literal component/frame name in a "
             "fact token. Prefer silence over a guessed fact — skip uncertain cases.\n"
             "Record each finding with record_knowledge (field='postconditions', "
-            "'preconditions', or 'usage_notes'). Use confidence=0.6 for new inferences."
+            "'preconditions', or 'usage_notes'). Use confidence=0.6 for inferences "
+            "(0.5 for name-only postconditions), 0.7 for usage notes."
         )
 
         agent_executor = create_react_agent(
