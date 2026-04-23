@@ -352,8 +352,10 @@ class AssemblyKnowledgeTools:
                 props = obj.properties
                 gripped = "yes" if props.is_gripped else "no"
                 assembled = "yes" if props.is_assembled else "no"
+                placed = "yes" if props.is_placed else "no"
+                on_chuck = "yes" if props.is_on_chuck else "no"
                 obj_parts.append(
-                    f"{obj.obj_name} (parent: {obj.parent_frame}, gripped: {gripped}, assembled: {assembled})"
+                    f"{obj.obj_name} (parent: {obj.parent_frame}, gripped: {gripped}, assembled: {assembled}, placed: {placed}, on_chuck: {on_chuck})"
                 )
 
                 n_vision = sum(
@@ -400,7 +402,7 @@ class AssemblyKnowledgeTools:
     def _get_scene_snapshot(self) -> dict:
         """Return a snapshot of current scene object states for state-diff.
 
-        Returns dict of {obj_name: {parent_frame, is_gripped, is_assembled, frames: [...]}}.
+        Returns dict of {obj_name: {parent_frame, is_gripped, is_assembled, is_placed, is_on_chuck, frames: [...]}}.
         Each frame includes its relevant type-specific properties.
         Does NOT call _ensure_scene_updated (caller is responsible).
         """
@@ -412,6 +414,8 @@ class AssemblyKnowledgeTools:
                 "parent_frame": obj.parent_frame,
                 "is_gripped": obj.properties.is_gripped,
                 "is_assembled": obj.properties.is_assembled,
+                "is_placed": obj.properties.is_placed,
+                "is_on_chuck": obj.properties.is_on_chuck,
                 "frames": [FrameHelper.to_dict(fr) for fr in obj.ref_frames],
             }
         return snapshot
@@ -630,6 +634,8 @@ class AssemblyKnowledgeTools:
                     "properties": {
                         "is_gripped": obj.properties.is_gripped,
                         "is_assembled": obj.properties.is_assembled,
+                        "is_placed": obj.properties.is_placed,
+                        "is_on_chuck": obj.properties.is_on_chuck,
                     },
                 })
 

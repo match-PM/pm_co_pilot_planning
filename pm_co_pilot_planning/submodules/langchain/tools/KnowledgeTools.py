@@ -9,6 +9,7 @@ Provides three tools:
 
 import json
 import os
+import re
 import threading
 import yaml
 from datetime import date, datetime
@@ -121,6 +122,11 @@ def _save_knowledge(knowledge_path: str, data: Dict[str, Any]) -> None:
 
 
 _SOURCE_PRIORITY = {"user_correction": 3, "experience": 2, "bootstrap": 1}
+
+
+def _normalize(text: str) -> str:
+    """Lowercase and collapse all non-alphanumeric runs to a single space for dedup."""
+    return re.sub(r"[\s\W_]+", " ", text.lower()).strip()
 
 
 # ---------------------------------------------------------------------------
@@ -413,12 +419,40 @@ class KnowledgeTools:
 
                     if field in ("preconditions", "postconditions"):
                         target_list = entry.setdefault(field, [])
-                        if content in target_list:
+                        norm_content = _normalize(content)
+
+                        def _existing_content(item):
+                            return item["content"] if isinstance(item, dict) else item
+
+                        match_idx = next(
+                            (i for i, e in enumerate(target_list)
+                             if _normalize(_existing_content(e)) == norm_content),
+                            None,
+                        )
+                        if match_idx is not None:
+                            existing = target_list[match_idx]
+                            if isinstance(existing, str):
+                                target_list[match_idx] = {
+                                    "content": existing,
+                                    "confidence": confidence,
+                                    "source": source,
+                                    "confirmation_count": 2,
+                                }
+                            else:
+                                old_conf = existing.get("confidence", 0.7)
+                                existing["confidence"] = min(1.0, round(old_conf + 0.05, 2))
+                                existing["confirmation_count"] = existing.get("confirmation_count", 1) + 1
+                            _save_knowledge(self._knowledge_path, data)
                             return ToolResponse.success(
-                                status="already_known",
-                                message=f"'{content}' already exists in {field} for {service_name}.",
+                                status="reinforced",
+                                message=f"Reinforced existing '{content}' in {field} of {service_name} (confidence now {target_list[match_idx]['confidence']}).",
                             )
-                        target_list.append(content)
+                        target_list.append({
+                            "content": content,
+                            "confidence": confidence,
+                            "source": source,
+                            "confirmation_count": 1,
+                        })
                         result_msg = f"Added '{content}' to {field} of {service_name}."
 
                     elif field == "parameters":
@@ -447,9 +481,10 @@ class KnowledgeTools:
                     else:
                         target_list = entry.setdefault("usage_notes", [])
 
-                        # Check for duplicate note text -> reinforce confidence
+                        # Check for duplicate note text (normalized) -> reinforce confidence
+                        norm_content = _normalize(content)
                         for existing in target_list:
-                            if isinstance(existing, dict) and existing.get("note") == content:
+                            if isinstance(existing, dict) and _normalize(existing.get("note", "")) == norm_content:
                                 old_conf = existing.get("confidence", 0.7)
                                 new_conf = min(1.0, round(old_conf + 0.1, 2))
                                 existing["confidence"] = new_conf
@@ -496,11 +531,7 @@ class KnowledgeTools:
 
             self.service_node.get_logger().info(f"KnowledgeTools: {result_msg}")
 
-            result = {"success": True, "message": result_msg}
-            if confidence < 0.7:
-                result["review_flag"] = "Low confidence - this entry will be flagged for human review."
-
-            return json.dumps(result)
+            return json.dumps({"success": True, "message": result_msg})
 
         except Exception as e:
             return ToolResponse.error(str(e))

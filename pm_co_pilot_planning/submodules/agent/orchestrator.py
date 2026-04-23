@@ -149,6 +149,7 @@ class Agent:
             knowledge_tools=knowledge_tools,
             service_node=service_node,
             system_prompt=learner_config.system_prompt,
+            rsap_instance=rsap_instance,
         )
         self._persistence = MemoryPersistence(service_node)
 
@@ -197,6 +198,7 @@ class Agent:
                     self.model_configs.get(self._phase.current_phase, {}).get("name", "unknown"),
                 )
                 self._logger.finish(ctx, "[interrupted: app closed]")
+                self._run_learning_if_needed(session_had_execution)
                 self.save_interaction_log()
                 return "Agent stopped: application was closed."
 
@@ -219,6 +221,7 @@ class Agent:
             # Handle mid-stream stop
             if result.interrupted:
                 self._logger.finish(ctx, result.response_text)
+                self._run_learning_if_needed(session_had_execution)
                 self.save_interaction_log()
                 return "Agent stopped: application was closed."
 
@@ -256,9 +259,11 @@ class Agent:
                 final_response = result.response_text
                 pending = None
 
-        # ── Post-loop: learning nudge ─────────────────────────────────────
-        # Runs for ANY session that had execution or escalation — fixing the
-        # original bug where escalated sessions were excluded.
+        self._run_learning_if_needed(session_had_execution)
+        self._phase.reset_to_planning()
+        return final_response
+
+    def _run_learning_if_needed(self, session_had_execution: bool) -> None:
         if session_had_execution and self.record_knowledge:
             learner_model_name = self.model_configs.get("learning", {}).get("name", "unknown")
             self._learning.run(
@@ -266,9 +271,6 @@ class Agent:
                 executed_services=self._get_executed_services(),
                 learner_model_name=learner_model_name,
             )
-
-        self._phase.reset_to_planning()
-        return final_response
 
     def save_interaction_log(self, task_success=None, comment=None):
         self._persistence.save_session_log(

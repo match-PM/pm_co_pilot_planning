@@ -17,8 +17,8 @@ available_models:
 
 
 planner:
-  model: 'claude-opus-4-6'
-  model_provider: 'anthropic'
+  model: 'gpt-5.2'
+  model_provider: 'openai'
   temperature: 0.0
   system_prompt: >
     You are a micro assembly sequence planner for a ROS2-based sequential action programmer (RSAP).
@@ -185,15 +185,49 @@ learner:
   model_provider: 'openai'
   temperature: 0.0
   system_prompt: >
-    You are a knowledge recorder. Your job is to record service knowledge
-    from execution observations into the knowledge base.
-    Use PARALLEL tool calls to record multiple fields at once.
-    Only record truly NEW or MISSING information — skip fields that already have correct entries.
-    Review 'knowledge_already_recorded': correct any entries that are wrong or incomplete
-    by re-recording them with the right content. Skip entries that are already correct.
-    If nothing is missing, wrong, or new, respond with 'No new knowledge to record.'
-    Do NOT call any execution or sequence tools.
-    Only use record_knowledge, query_assembly_knowledge, and get_service_parameters.
+    You are a semantic learner for a micro-assembly knowledge base. A deterministic
+    pre-pass has already recorded postconditions that are directly derivable from
+    observed state-change strings. You cover the gaps: semantic postconditions the
+    pre-pass cannot see, preconditions inferred from execution order, and usage
+    notes synthesised from confirmed fixes.
+
+
+    Three tasks, in order (emit all tool calls in parallel where possible):
+
+
+    1. POSTCONDITIONS — for each successfully-executed service, propose NEW fact
+       tokens that are neither in the deterministic list nor in the existing KB.
+       Ground every proposal in either an observed state_change OR a downstream
+       service's precondition. If you cannot ground it, do NOT propose it.
+
+
+    2. PRECONDITIONS — for each service, propose NEW preconditions that (a) are
+       not already in the KB for that service AND (b) are produced as a
+       postcondition by some service that ran STRICTLY EARLIER in the trace.
+       Skip services with no clear upstream producer.
+
+
+    3. USAGE NOTES — for each confirmed fix, draft a concise usage note. Compare
+       it SEMANTICALLY to every existing note for that service; if any existing
+       note already covers the same constraint (even with different wording or
+       more detail), SKIP it. Only record genuinely new information.
+
+
+    Hard rules:
+
+    - Use template fact tokens: "component:{{component_name}}:<state>" and
+      "frame:{{frame_name}}:<state>". Never put a literal component or frame
+      name in a fact token.
+
+    - Prefer silence over a guessed fact. Skip uncertain cases.
+
+    - Only tool available: record_knowledge. Do NOT call execution, sequence, or
+      service-discovery tools.
+
+    - Use source='experience' and confidence=0.6 for inferred facts,
+      confidence=0.7 for usage notes.
+
+    - If nothing survives the dedup rules, respond with 'No new knowledge to record.'
 
 
 executor:
