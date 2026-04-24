@@ -1,5 +1,4 @@
 import json
-import re
 from datetime import datetime
 
 from langchain_core.messages import HumanMessage, AIMessage, ToolMessage, SystemMessage
@@ -8,36 +7,15 @@ from langgraph.prebuilt import create_react_agent
 from .interaction_logger import InteractionLogger
 
 
-# Maps regex patterns on state_change strings to (postcondition_fact_token, confidence).
-# More-specific patterns must come before more-general ones.
-# Property-type prefix disambiguates vision frames from laser frames.
-STATE_CHANGE_MAP = [
-    (r"\.vision_frame_properties\.has_been_measured changed to True$",
-     "frame:{frame_name}:vision_corrected", 0.8),
-    (r"\.laser_frame_properties\.has_been_measured changed to True$",
-     "frame:{frame_name}:laser_corrected", 0.8),
-    (r"\.is_gripped changed to True$",
-     "component:{component_name}:gripped", 0.8),
-    (r"\.is_assembled changed to True$",
-     "component:{component_name}:assembled", 0.8),
-    (r"\.is_placed changed to True$",
-     "component:{component_name}:placed", 0.8),
-    (r"\bappeared in scene$",
-     "component:{component_name}:spawned", 0.9),
-]
-
-
 class LearningManager:
     """
-    Post-execution knowledge recording.
+    Post-execution knowledge recording via a single LLM pass.
 
-    Two-pass design:
-    1. Deterministic pass — maps observed state_changes to postcondition fact tokens
-       via STATE_CHANGE_MAP and writes them directly to the KB (cheap, zero hallucination).
-    2. LLM semantic pass (always runs if anything executed successfully) — proposes
-       additional postconditions (silent services, semantic facts), preconditions
-       inferred from execution order, and usage notes from confirmed fixes. Semantic
-       dedup against the existing KB is enforced in the prompt.
+    After each execution the learner receives the full trace — concrete state
+    changes per service, confirmed parameter fixes together with the error
+    messages they resolved, and the current KB view — and generates zero or
+    more natural-language knowledge entries (general_knowledge or per-service
+    usage_notes).  No templated fact tokens are produced.
     """
 
     def __init__(self, learning_model, learning_tools, knowledge_tools, service_node,
@@ -55,8 +33,7 @@ class LearningManager:
         executed_services: list,
         learner_model_name: str,
     ):
-        """Deterministic pass (postconditions from state changes) + LLM pass
-        (semantic postconditions, preconditions, usage notes — always runs)."""
+        """Single LLM pass that generates natural-language knowledge entries."""
         if not executed_services:
             self._service_node.get_logger().info(
                 "Learning nudge skipped: no service clients found in sequence."
@@ -77,10 +54,6 @@ class LearningManager:
             f"(from {exec_interaction_count} execution/escalated interactions)"
         )
 
-        # ── Pass 1: deterministic postcondition recording ──────────────────
-        deterministic_recorded = self._deterministic_pass(state_changes_by_service)
-
-        # ── Pass 2: LLM semantic pass — postconditions, preconditions, usage notes ─
         if not execution_order and not fixes_applied:
             self._service_node.get_logger().info(
                 "Learning nudge: nothing ran successfully and no fixes — skipping LLM pass."
@@ -88,7 +61,7 @@ class LearningManager:
             interaction_logger.append_raw({
                 "timestamp": datetime.now().isoformat(),
                 "user_message": "[post-execution learning nudge]",
-                "agent_response": "Deterministic pass only — no successful executions to analyze.",
+                "agent_response": "No successful executions to analyze.",
                 "phase": "learning",
                 "model": learner_model_name,
                 "steps": 0,
@@ -100,9 +73,9 @@ class LearningManager:
         learning_start = datetime.now()
         try:
             result_text, step_details, input_tokens, output_tokens = self._run_learning_agent(
+                state_changes_by_service=state_changes_by_service,
                 execution_order=execution_order,
                 fixes_applied=fixes_applied,
-                deterministic_recorded=deterministic_recorded,
             )
         except Exception as e:
             self._service_node.get_logger().warning(
@@ -132,42 +105,6 @@ class LearningManager:
             },
         })
 
-    # ── Deterministic pass ──────────────────────────────────────────────────
-
-    def _deterministic_pass(self, state_changes_by_service: dict) -> dict:
-        """Map state_change strings to postcondition fact tokens and write directly to KB.
-
-        Returns {service_client: [fact_token, ...]} — what was recorded this pass,
-        so the LLM pass can dedup against it.
-        """
-        recorded: dict = {}
-        for service_name, changes in state_changes_by_service.items():
-            recorded_tokens: set = set()
-            for change in changes:
-                for pattern, fact_token, confidence in STATE_CHANGE_MAP:
-                    if re.search(pattern, change):
-                        if fact_token not in recorded_tokens:
-                            recorded_tokens.add(fact_token)
-                            result_raw = self._knowledge_tools._record_knowledge(
-                                content=fact_token,
-                                field="postconditions",
-                                service_name=service_name,
-                                source="experience",
-                                confidence=confidence,
-                            )
-                            try:
-                                msg = json.loads(result_raw).get("message", "")
-                            except Exception:
-                                msg = result_raw
-                            self._service_node.get_logger().info(
-                                f"Learning deterministic: [{service_name}] "
-                                f"postcondition '{fact_token}' — {msg}"
-                            )
-                        break  # stop at first matching pattern per change string
-            if recorded_tokens:
-                recorded[service_name] = sorted(recorded_tokens)
-        return recorded
-
     # ── LangGraph hook ──────────────────────────────────────────────────────
 
     def _pre_model_hook(self, state):
@@ -180,19 +117,11 @@ class LearningManager:
 
     def _run_learning_agent(
         self,
+        state_changes_by_service: dict,
         execution_order: list,
         fixes_applied: list,
-        deterministic_recorded: dict,
     ) -> tuple[str, list, int, int]:
-        """Run the semantic learner over the execution trace.
-
-        Responsibilities:
-          1. Propose NEW postconditions for services (silent or semantic-gap cases
-             the deterministic pass couldn't see).
-          2. Propose NEW preconditions, grounded in services that ran earlier.
-          3. Synthesize usage notes from confirmed fixes, with semantic dedup.
-        """
-        # Gather the set of services that participated (executed successfully OR fixed)
+        """Run the natural-language learner over the execution trace."""
         service_names: set = {
             entry.get("service_client") for entry in execution_order
             if entry.get("service_client")
@@ -201,7 +130,6 @@ class LearningManager:
             f["service_client"] for f in fixes_applied if f.get("service_client")
         )
 
-        # Build a slim KB view for dedup: {svc: {preconditions:[text], postconditions:[text], usage_notes:[text]}}
         existing_kb: dict = {}
         for svc in sorted(service_names):
             raw = self._knowledge_tools.get_knowledge_for_services([svc])
@@ -224,15 +152,15 @@ class LearningManager:
             }
 
         human_message = (
-            "EXECUTION TRACE (ordered, successful actions only):\n"
+            "STATE CHANGES observed per service (raw, concrete, deduped):\n"
+            f"{json.dumps(state_changes_by_service, indent=2)}\n\n"
+            "EXECUTION TRACE (ordered, one entry per action index):\n"
             f"{json.dumps(execution_order, indent=2)}\n\n"
-            "POSTCONDITIONS JUST RECORDED BY THE DETERMINISTIC PASS "
-            "(already in the KB — do NOT re-record):\n"
-            f"{json.dumps(deterministic_recorded, indent=2)}\n\n"
-            "EXISTING KB STATE (for dedup — only text shown):\n"
-            f"{json.dumps(existing_kb, indent=2)}\n\n"
-            "CONFIRMED FIXES (parameter changes that resolved failures):\n"
-            f"{json.dumps(fixes_applied, indent=2)}"
+            "CONFIRMED FIXES (parameter changes that resolved failures, with the "
+            "error messages they resolved):\n"
+            f"{json.dumps(fixes_applied, indent=2)}\n\n"
+            "EXISTING KB STATE for involved services (for semantic dedup):\n"
+            f"{json.dumps(existing_kb, indent=2)}"
         )
 
         agent_executor = create_react_agent(
@@ -325,15 +253,11 @@ class LearningManager:
     # ── Execution summary ───────────────────────────────────────────────────
 
     def _build_execution_summary(self, interaction_logger: InteractionLogger) -> dict:
-        """Extract state_changes_by_service, confirmed fixes, and ordered trace.
+        """Extract state_changes_by_service, confirmed fixes (with failure messages), and ordered trace.
 
         Fixes are only included when the subsequent re-execution of the same action
-        index succeeded (Issue 6). Failed-then-succeeded actions contribute their
-        state_changes from both attempts, but appear once in the summary (Issue 7).
-
-        `execution_order` is an ordered list of per-index outcomes (one entry per
-        index, carrying the final success flag) used by the LLM pass to reason
-        about which services ran before which.
+        index succeeded.  Each confirmed fix carries the error messages from the
+        failed attempt(s) it resolved so the LLM can formulate constraint rules.
         """
         fixes_confirmed: list = []
         state_changes_by_service: dict = {}
@@ -370,10 +294,27 @@ class LearningManager:
 
         # Pending fixes: index → fix_data, waiting for confirmation by a successful retry
         pending_fixes: dict = {}
+        # Failure messages per index for passing to confirmed fixes
+        failure_messages_by_index: dict = {}
 
         # Per-index state: track first-seen order, accumulated state_changes, final success
         index_order: list = []  # indices in the order they are first seen
         outcome_by_index: dict = {}  # index → {"success": bool, "state_changes": [...]}
+
+        def _extract_failure_message(data: dict) -> str:
+            """Pull the most informative failure description from a tool result dict."""
+            parts = []
+            if data.get("message"):
+                msg = data["message"]
+                if isinstance(msg, dict):
+                    parts.append(json.dumps(msg))
+                else:
+                    parts.append(str(msg))
+            if data.get("error_detail"):
+                parts.append(str(data["error_detail"]))
+            elif data.get("response"):
+                parts.append(json.dumps(data["response"]))
+            return " | ".join(parts) if parts else json.dumps(data)
 
         def _handle_tool_result(data: dict) -> None:
             if "success" not in data or "index" not in data:
@@ -396,6 +337,12 @@ class LearningManager:
                 if change not in outcome_by_index[idx]["state_changes"]:
                     outcome_by_index[idx]["state_changes"].append(change)
 
+            # Capture failure messages before overwriting success flag
+            if not data.get("success"):
+                msg = _extract_failure_message(data)
+                if msg:
+                    failure_messages_by_index.setdefault(idx, []).append(msg)
+
             # Final success wins (retries overwrite)
             if data.get("success"):
                 outcome_by_index[idx]["success"] = True
@@ -403,7 +350,9 @@ class LearningManager:
             # Confirm a pending fix when the re-execution succeeds
             if idx in pending_fixes:
                 if data.get("success"):
-                    fixes_confirmed.append(pending_fixes.pop(idx))
+                    fix = pending_fixes.pop(idx)
+                    fix["failure_messages"] = failure_messages_by_index.get(idx, [])
+                    fixes_confirmed.append(fix)
                 # If still failing, keep in pending (another fix attempt may follow)
 
         for step in all_steps:
@@ -437,9 +386,7 @@ class LearningManager:
                 except (json.JSONDecodeError, TypeError):
                     pass
 
-        # Build ordered execution trace (successful actions only — failures contributed
-        # state_changes already, but for precondition inference we care about what
-        # ultimately ran to completion).
+        # Build ordered execution trace (successful actions only)
         execution_order: list = []
         for idx in index_order:
             outcome = outcome_by_index[idx]

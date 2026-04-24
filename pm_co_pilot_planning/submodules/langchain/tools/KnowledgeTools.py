@@ -111,6 +111,13 @@ def _load_knowledge(knowledge_path: str) -> Dict[str, Any]:
             "services": {},
             "general_knowledge": [],
         }
+    # YAML serialises an empty dict as `{}` but can round-trip as `[]` when
+    # the file was written with default_flow_style or by hand. Normalise so
+    # _record_knowledge never receives a list where it expects a dict.
+    if not isinstance(data.get("services"), dict):
+        data["services"] = {}
+    if not isinstance(data.get("general_knowledge"), list):
+        data["general_knowledge"] = []
     return data
 
 
