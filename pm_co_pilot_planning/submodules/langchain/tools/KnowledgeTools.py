@@ -1,10 +1,12 @@
 """
 KnowledgeTools: LangChain tools for service-centric domain knowledge management.
 
-Provides three tools:
-  - query_assembly_knowledge: Retrieve service knowledge (pre/postconditions, usage notes)
+Provides five tools:
+  - query_assembly_knowledge: Retrieve service knowledge (parameters, usage notes)
   - get_similar_assembly_example: Find reference execution traces by component/assembly name
   - record_knowledge: Save new knowledge to a specific service or general knowledge
+  - confirm_knowledge: Increment confirmation_count on an existing usage_note by id
+  - contradict_knowledge: Increment contradiction_count on an existing usage_note by id
 """
 
 import json
@@ -50,6 +52,39 @@ class GetExampleInput(BaseModel):
     )
 
 
+class ConfirmKnowledgeInput(BaseModel):
+    service_name: str = Field(
+        description=(
+            "Exact ROS2 service_client whose usage_note is being confirmed "
+            "(e.g. '/pm_skills/vision_correct_frame')."
+        ),
+    )
+    note_id: str = Field(
+        description=(
+            "The id of the existing usage_note to confirm "
+            "(e.g. 'usage_vision_correct_frame_001')."
+        ),
+    )
+
+
+class ContradictKnowledgeInput(BaseModel):
+    service_name: str = Field(
+        description=(
+            "Exact ROS2 service_client whose usage_note is being contradicted "
+            "(e.g. '/pm_skills/iterative_align_gonio_left')."
+        ),
+    )
+    note_id: str = Field(
+        description="The id of the existing usage_note that the new evidence disproves.",
+    )
+    evidence: str = Field(
+        description=(
+            "One-sentence description of the specific state change, parameter value, "
+            "or error message that contradicts this note."
+        ),
+    )
+
+
 class RecordKnowledgeInput(BaseModel):
     service_name: str = Field(
         default="",
@@ -61,17 +96,17 @@ class RecordKnowledgeInput(BaseModel):
     )
     field: str = Field(
         description=(
-            "Which field to add to: 'preconditions', 'postconditions', "
-            "'usage_notes', or 'parameters'. For general_knowledge, use 'usage_notes'. "
+            "Which field to add to: 'usage_notes' or 'parameters'. "
+            "For general_knowledge (empty service_name), use 'usage_notes'. "
             "For 'parameters': content must be a JSON string with keys 'name', 'type', "
             "and 'description' (e.g. '{\"name\": \"target_frame\", \"type\": \"string\", \"description\": \"Frame to align to\"}')."
         ),
     )
     content: str = Field(
         description=(
-            "The knowledge to record. For preconditions/postconditions: a fact token "
-            "(e.g. 'component:{component_name}:spawned'). "
-            "For usage_notes: a clear imperative statement."
+            "The knowledge to record. For usage_notes: a clear prescriptive statement "
+            "(what a future planner MUST, SHOULD, or MUST NOT do). "
+            "For parameters: a JSON string with 'name', 'type', and 'description' keys."
         ),
     )
     category: str = Field(
@@ -99,7 +134,7 @@ def _load_knowledge(knowledge_path: str) -> Dict[str, Any]:
     """Load the service_knowledge.yaml file. Returns empty structure if not found."""
     if not os.path.isfile(knowledge_path):
         return {
-            "metadata": {"version": 2, "schema": "service_preconditions_v1"},
+            "metadata": {"version": 2, "schema": "service_knowledge_v2"},
             "services": {},
             "general_knowledge": [],
         }
@@ -107,7 +142,7 @@ def _load_knowledge(knowledge_path: str) -> Dict[str, Any]:
         data = yaml.safe_load(f)
     if data is None:
         return {
-            "metadata": {"version": 2, "schema": "service_preconditions_v1"},
+            "metadata": {"version": 2, "schema": "service_knowledge_v2"},
             "services": {},
             "general_knowledge": [],
         }
@@ -179,8 +214,7 @@ class KnowledgeTools:
             func=self._query_assembly_knowledge,
             name="query_assembly_knowledge",
             description=(
-                "Return service domain knowledge: preconditions, postconditions, "
-                "usage notes, and learned entries for each service.\n\n"
+                "Return service domain knowledge: parameters, usage notes, and general knowledge.\n\n"
                 "- Call with NO arguments to get ALL services + general knowledge (for planning).\n"
                 "- Call with service_name to get knowledge for a specific service (for error recovery).\n\n"
                 "ALWAYS call this FIRST when planning a new assembly sequence."
@@ -209,11 +243,10 @@ class KnowledgeTools:
                 "Specify a service_client to add to a specific service's entry, "
                 "or leave empty to add to general_knowledge.\n\n"
                 "Fields you can add to:\n"
-                "  - 'preconditions': add a new fact token that must be true before calling this service\n"
-                "  - 'postconditions': add a new fact token that becomes true after calling this service\n"
+                "  - 'usage_notes': add a prescriptive rule, constraint, or learned lesson "
+                "(what a future planner MUST, SHOULD, or MUST NOT do)\n"
                 "  - 'parameters': add or update one parameter entry; content must be a JSON string: "
-                "{\"name\": \"<param_name>\", \"type\": \"<type>\", \"description\": \"<what it does>\"}\n"
-                "  - 'usage_notes': add a usage tip, constraint, or learned lesson for this service\n\n"
+                "{\"name\": \"<param_name>\", \"type\": \"<type>\", \"description\": \"<what it does>\"}\n\n"
                 "Call this when:\n"
                 "  - The user corrects your approach (source='user_correction', confidence=0.9)\n"
                 "  - You resolve an execution error (source='experience', confidence=0.7)\n"
@@ -243,10 +276,7 @@ class KnowledgeTools:
                 entry = services_kb[svc]
                 subset[svc] = {
                     "description": entry.get("description", ""),
-                    "preconditions": entry.get("preconditions", []),
-                    "postconditions": entry.get("postconditions", []),
                     "usage_notes": entry.get("usage_notes", []),
-                    "learned": entry.get("learned", []),
                 }
             else:
                 subset[svc] = {"not_in_kb": True}
@@ -280,20 +310,14 @@ class KnowledgeTools:
                     service=service_name,
                     found=True,
                     description=entry.get("description", ""),
-                    preconditions=entry.get("preconditions", []),
-                    postconditions=entry.get("postconditions", []),
                     usage_notes=entry.get("usage_notes", []),
-                    learned=entry.get("learned", []),
                 )
             else:
                 formatted_services = {}
                 for svc_name, entry in services.items():
                     formatted_services[svc_name] = {
                         "description": entry.get("description", ""),
-                        "preconditions": entry.get("preconditions", []),
-                        "postconditions": entry.get("postconditions", []),
                         "usage_notes": entry.get("usage_notes", []),
-                        "learned": entry.get("learned", []),
                     }
 
                 documented = list(services.keys())
@@ -399,7 +423,7 @@ class KnowledgeTools:
                     f"Invalid source '{source}'. Must be 'user_correction' or 'experience'."
                 )
 
-            valid_fields = ("preconditions", "postconditions", "usage_notes", "parameters")
+            valid_fields = ("usage_notes", "parameters")
             if service_name and field not in valid_fields:
                 return ToolResponse.error(
                     f"Invalid field '{field}'. Must be one of: {', '.join(valid_fields)}."
@@ -416,53 +440,13 @@ class KnowledgeTools:
                     if service_name not in services:
                         services[service_name] = {
                             "description": "",
-                            "preconditions": [],
-                            "postconditions": [],
                             "parameters": {},
                             "usage_notes": [],
                         }
 
                     entry = services[service_name]
 
-                    if field in ("preconditions", "postconditions"):
-                        target_list = entry.setdefault(field, [])
-                        norm_content = _normalize(content)
-
-                        def _existing_content(item):
-                            return item["content"] if isinstance(item, dict) else item
-
-                        match_idx = next(
-                            (i for i, e in enumerate(target_list)
-                             if _normalize(_existing_content(e)) == norm_content),
-                            None,
-                        )
-                        if match_idx is not None:
-                            existing = target_list[match_idx]
-                            if isinstance(existing, str):
-                                target_list[match_idx] = {
-                                    "content": existing,
-                                    "confidence": confidence,
-                                    "source": source,
-                                    "confirmation_count": 2,
-                                }
-                            else:
-                                old_conf = existing.get("confidence", 0.7)
-                                existing["confidence"] = min(1.0, round(old_conf + 0.05, 2))
-                                existing["confirmation_count"] = existing.get("confirmation_count", 1) + 1
-                            _save_knowledge(self._knowledge_path, data)
-                            return ToolResponse.success(
-                                status="reinforced",
-                                message=f"Reinforced existing '{content}' in {field} of {service_name} (confidence now {target_list[match_idx]['confidence']}).",
-                            )
-                        target_list.append({
-                            "content": content,
-                            "confidence": confidence,
-                            "source": source,
-                            "confirmation_count": 1,
-                        })
-                        result_msg = f"Added '{content}' to {field} of {service_name}."
-
-                    elif field == "parameters":
+                    if field == "parameters":
                         try:
                             param_data = json.loads(content)
                         except json.JSONDecodeError as exc:
@@ -490,12 +474,14 @@ class KnowledgeTools:
 
                         # Check for duplicate note text (normalized) -> reinforce confidence
                         norm_content = _normalize(content)
+                        now_str = datetime.now().strftime("%Y-%m-%d %H:%M")
                         for existing in target_list:
                             if isinstance(existing, dict) and _normalize(existing.get("note", "")) == norm_content:
                                 old_conf = existing.get("confidence", 0.7)
                                 new_conf = min(1.0, round(old_conf + 0.1, 2))
                                 existing["confidence"] = new_conf
                                 existing["confirmation_count"] = existing.get("confirmation_count", 1) + 1
+                                existing["last_confirmed"] = now_str
                                 _save_knowledge(self._knowledge_path, data)
                                 return ToolResponse.success(
                                     status="reinforced",
@@ -514,6 +500,9 @@ class KnowledgeTools:
                             "source": source,
                             "created": datetime.now().strftime("%Y-%m-%d %H:%M"),
                             "confirmation_count": 1,
+                            "contradiction_count": 0,
+                            "last_confirmed": None,
+                            "last_contradicted": None,
                         }
                         target_list.append(new_entry)
                         result_msg = f"Added usage note '{new_id}' to {service_name}."
@@ -526,7 +515,7 @@ class KnowledgeTools:
                     new_entry = {
                         "id": new_id,
                         "category": category or "uncategorized",
-                        "rule": content,
+                        "note": content,
                         "confidence": confidence,
                         "source": source,
                         "created": datetime.now().strftime("%Y-%m-%d %H:%M"),

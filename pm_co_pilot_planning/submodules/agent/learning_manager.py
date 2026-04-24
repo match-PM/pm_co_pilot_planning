@@ -146,8 +146,6 @@ class LearningManager:
                 return [t for t in result if t]
 
             existing_kb[svc] = {
-                "preconditions": _text_list(entry.get("preconditions", [])),
-                "postconditions": _text_list(entry.get("postconditions", [])),
                 "usage_notes": _text_list(entry.get("usage_notes", [])),
             }
 
