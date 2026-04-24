@@ -649,7 +649,7 @@ class RsapTools:
             if name not in before:
                 continue
             # Object-level property changes
-            for prop in ("is_gripped", "is_assembled", "parent_frame"):
+            for prop in ("is_gripped", "is_assembled", "parent_frame", "is_placed"):
                 if before[name].get(prop) != after[name].get(prop):
                     changes.append(
                         f"{name}.{prop} changed to {after[name][prop]}"

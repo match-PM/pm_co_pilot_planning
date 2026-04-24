@@ -20,6 +20,8 @@ STATE_CHANGE_MAP = [
      "component:{component_name}:gripped", 0.8),
     (r"\.is_assembled changed to True$",
      "component:{component_name}:assembled", 0.8),
+    (r"\.is_placed changed to True$",
+     "component:{component_name}:placed", 0.8),
     (r"\bappeared in scene$",
      "component:{component_name}:spawned", 0.9),
 ]
