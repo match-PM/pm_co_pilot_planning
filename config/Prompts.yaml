@@ -17,7 +17,7 @@ available_models:
 
 
 planner:
-  model: 'gpt-5.4'
+  model: 'gpt-5.2'
   model_provider: 'openai'
   temperature: 0.0
   system_prompt: >
