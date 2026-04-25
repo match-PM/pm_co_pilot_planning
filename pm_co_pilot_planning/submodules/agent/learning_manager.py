@@ -135,18 +135,13 @@ class LearningManager:
             raw = self._knowledge_tools.get_knowledge_for_services([svc])
             data = json.loads(raw)
             entry = data.get("services", {}).get(svc, {})
-
-            def _text_list(items):
-                result = []
-                for it in items or []:
-                    if isinstance(it, dict):
-                        result.append(it.get("content") or it.get("note") or "")
-                    else:
-                        result.append(it)
-                return [t for t in result if t]
-
+            # Expose id+note pairs so the learner can confirm/contradict by id.
+            # get_knowledge_for_services already returns {"id": ..., "note": ...} dicts.
             existing_kb[svc] = {
-                "usage_notes": _text_list(entry.get("usage_notes", [])),
+                "usage_notes": [
+                    n for n in entry.get("usage_notes", [])
+                    if isinstance(n, dict) and n.get("note")
+                ],
             }
 
         human_message = (

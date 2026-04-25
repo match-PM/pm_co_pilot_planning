@@ -239,7 +239,7 @@ class KnowledgeTools:
             func=self._record_knowledge,
             name="record_knowledge",
             description=(
-                "Save new knowledge to the service knowledge base.\n\n"
+                "Save NEW knowledge to the service knowledge base.\n\n"
                 "Specify a service_client to add to a specific service's entry, "
                 "or leave empty to add to general_knowledge.\n\n"
                 "Fields you can add to:\n"
@@ -247,6 +247,9 @@ class KnowledgeTools:
                 "(what a future planner MUST, SHOULD, or MUST NOT do)\n"
                 "  - 'parameters': add or update one parameter entry; content must be a JSON string: "
                 "{\"name\": \"<param_name>\", \"type\": \"<type>\", \"description\": \"<what it does>\"}\n\n"
+                "Call this ONLY for genuinely new insights not covered by existing notes.\n"
+                "To reinforce an existing note use confirm_knowledge; to mark one disproven "
+                "use contradict_knowledge.\n\n"
                 "Call this when:\n"
                 "  - The user corrects your approach (source='user_correction', confidence=0.9)\n"
                 "  - You resolve an execution error (source='experience', confidence=0.7)\n"
@@ -254,6 +257,34 @@ class KnowledgeTools:
                 "Do NOT record facts discoverable via existing tools (component frames, service parameters)."
             ),
             args_schema=RecordKnowledgeInput,
+        )
+
+        self.confirm_knowledge_tool = StructuredTool.from_function(
+            func=self._confirm_knowledge,
+            name="confirm_knowledge",
+            description=(
+                "Confirm that an existing usage_note is consistent with the current run's evidence.\n\n"
+                "Call this when the execution evidence re-demonstrates a rule that is already "
+                "in the knowledge base. Increments confirmation_count and bumps confidence (+0.05).\n\n"
+                "Use the note id from EXISTING KB STATE (e.g. 'usage_vision_correct_frame_001').\n"
+                "Do NOT call this for general_knowledge entries — they are authoritative by definition."
+            ),
+            args_schema=ConfirmKnowledgeInput,
+        )
+
+        self.contradict_knowledge_tool = StructuredTool.from_function(
+            func=self._contradict_knowledge,
+            name="contradict_knowledge",
+            description=(
+                "Mark an existing usage_note as contradicted by the current run's evidence.\n\n"
+                "Call this when the execution evidence disproves a rule already in the KB "
+                "(e.g. a note says X is required but this run succeeded without X; "
+                "or a note specifies a parameter value that this run showed was wrong).\n\n"
+                "Increments contradiction_count, decrements confidence (-0.15), and logs the evidence.\n"
+                "Use the note id from EXISTING KB STATE. "
+                "Do NOT call this for general_knowledge entries."
+            ),
+            args_schema=ContradictKnowledgeInput,
         )
 
     # ------------------------------------------------------------------
@@ -276,7 +307,11 @@ class KnowledgeTools:
                 entry = services_kb[svc]
                 subset[svc] = {
                     "description": entry.get("description", ""),
-                    "usage_notes": entry.get("usage_notes", []),
+                    "usage_notes": [
+                        {"id": n.get("id"), "note": n.get("note", "")}
+                        for n in entry.get("usage_notes", [])
+                        if isinstance(n, dict) and n.get("note")
+                    ],
                 }
             else:
                 subset[svc] = {"not_in_kb": True}
@@ -472,23 +507,6 @@ class KnowledgeTools:
                     else:
                         target_list = entry.setdefault("usage_notes", [])
 
-                        # Check for duplicate note text (normalized) -> reinforce confidence
-                        norm_content = _normalize(content)
-                        now_str = datetime.now().strftime("%Y-%m-%d %H:%M")
-                        for existing in target_list:
-                            if isinstance(existing, dict) and _normalize(existing.get("note", "")) == norm_content:
-                                old_conf = existing.get("confidence", 0.7)
-                                new_conf = min(1.0, round(old_conf + 0.1, 2))
-                                existing["confidence"] = new_conf
-                                existing["confirmation_count"] = existing.get("confirmation_count", 1) + 1
-                                existing["last_confirmed"] = now_str
-                                _save_knowledge(self._knowledge_path, data)
-                                return ToolResponse.success(
-                                    status="reinforced",
-                                    id=existing.get("id"),
-                                    message=f"Reinforced existing note (confidence {old_conf} -> {new_conf}).",
-                                )
-
                         existing_ids = [n.get("id", "") for n in target_list if isinstance(n, dict)]
                         svc_short = service_name.rsplit("/", 1)[-1] if service_name else "gen"
                         new_id = generate_sequential_id(f"usage_{svc_short}", existing_ids)
@@ -528,6 +546,84 @@ class KnowledgeTools:
             self.service_node.get_logger().info(f"KnowledgeTools: {result_msg}")
 
             return json.dumps({"success": True, "message": result_msg})
+
+        except Exception as e:
+            return ToolResponse.error(str(e))
+
+    def _confirm_knowledge(self, service_name: str, note_id: str) -> str:
+        """Increment confirmation_count on an existing usage_note."""
+        try:
+            with self._write_lock:
+                data = _load_knowledge(self._knowledge_path)
+                entry = data.get("services", {}).get(service_name)
+                if entry is None:
+                    return ToolResponse.error(
+                        f"Service '{service_name}' not found in knowledge base."
+                    )
+                note = next(
+                    (n for n in entry.get("usage_notes", [])
+                     if isinstance(n, dict) and n.get("id") == note_id),
+                    None,
+                )
+                if note is None:
+                    return ToolResponse.error(
+                        f"Note '{note_id}' not found under '{service_name}'."
+                    )
+                now_str = datetime.now().strftime("%Y-%m-%d %H:%M")
+                old_conf = note.get("confidence", 0.6)
+                new_conf = min(1.0, round(old_conf + 0.05, 2))
+                note["confidence"] = new_conf
+                note["confirmation_count"] = note.get("confirmation_count", 0) + 1
+                note["last_confirmed"] = now_str
+                _save_knowledge(self._knowledge_path, data)
+
+            msg = (
+                f"Confirmed '{note_id}' under '{service_name}': "
+                f"confirmation_count={note['confirmation_count']}, "
+                f"confidence {old_conf} -> {new_conf}."
+            )
+            self.service_node.get_logger().info(f"KnowledgeTools: {msg}")
+            return json.dumps({"success": True, "message": msg})
+
+        except Exception as e:
+            return ToolResponse.error(str(e))
+
+    def _contradict_knowledge(self, service_name: str, note_id: str, evidence: str) -> str:
+        """Decrement confidence and log evidence on an existing usage_note."""
+        try:
+            with self._write_lock:
+                data = _load_knowledge(self._knowledge_path)
+                entry = data.get("services", {}).get(service_name)
+                if entry is None:
+                    return ToolResponse.error(
+                        f"Service '{service_name}' not found in knowledge base."
+                    )
+                note = next(
+                    (n for n in entry.get("usage_notes", [])
+                     if isinstance(n, dict) and n.get("id") == note_id),
+                    None,
+                )
+                if note is None:
+                    return ToolResponse.error(
+                        f"Note '{note_id}' not found under '{service_name}'."
+                    )
+                now_str = datetime.now().strftime("%Y-%m-%d %H:%M")
+                old_conf = note.get("confidence", 0.6)
+                new_conf = max(0.0, round(old_conf - 0.15, 2))
+                note["confidence"] = new_conf
+                note["contradiction_count"] = note.get("contradiction_count", 0) + 1
+                note["last_contradicted"] = now_str
+                contradiction_log = note.setdefault("contradiction_notes", [])
+                contradiction_log.append(f"[{now_str}] {evidence}")
+                _save_knowledge(self._knowledge_path, data)
+
+            msg = (
+                f"Contradicted '{note_id}' under '{service_name}': "
+                f"contradiction_count={note['contradiction_count']}, "
+                f"confidence {old_conf} -> {new_conf}."
+            )
+            self.service_node.get_logger().info(f"KnowledgeTools: {msg}")
+            return json.dumps({"success": True, "message": msg})
 
         except Exception as e:
             return ToolResponse.error(str(e))

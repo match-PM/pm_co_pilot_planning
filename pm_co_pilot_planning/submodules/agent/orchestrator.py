@@ -118,6 +118,8 @@ class Agent:
         learning_tools = [
             knowledge_tools.query_assembly_knowledge_tool,
             knowledge_tools.record_knowledge_tool,
+            knowledge_tools.confirm_knowledge_tool,
+            knowledge_tools.contradict_knowledge_tool,
             tools_instance.get_service_parameters_tool,
         ]
 
