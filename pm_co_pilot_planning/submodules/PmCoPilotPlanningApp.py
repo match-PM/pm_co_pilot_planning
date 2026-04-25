@@ -229,6 +229,11 @@ class PmCoPilotPlanningApp(QMainWindow):
             lambda state: setattr(self.agent, "record_knowledge", bool(state))
         )
 
+        self.agent.consolidate_knowledge = self.consolidate_knowledge_checkbox.isChecked()
+        self.consolidate_knowledge_checkbox.stateChanged.connect(
+            lambda state: setattr(self.agent, "consolidate_knowledge", bool(state))
+        )
+
         self.update_status_display("Assistant initialized and ready for your input!")
 
 
@@ -269,6 +274,12 @@ class PmCoPilotPlanningApp(QMainWindow):
         self.record_knowledge_checkbox.setFont(QFont("Helvetica", 12))
         self.record_knowledge_checkbox.setChecked(False)
         self.layout.addWidget(self.record_knowledge_checkbox)
+
+        # Knowledge consolidation toggle (auto-consolidate every 3 learning sessions)
+        self.consolidate_knowledge_checkbox = QCheckBox("Consolidate Knowledge")
+        self.consolidate_knowledge_checkbox.setFont(QFont("Helvetica", 12))
+        self.consolidate_knowledge_checkbox.setChecked(False)
+        self.layout.addWidget(self.consolidate_knowledge_checkbox)
 
         # Add a text edit for typing messages
         self.message_input = QTextEdit()

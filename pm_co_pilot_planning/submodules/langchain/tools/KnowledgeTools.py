@@ -130,11 +130,19 @@ class RecordKnowledgeInput(BaseModel):
 # Helper functions
 # ---------------------------------------------------------------------------
 
+_METADATA_DEFAULTS = {
+    "version": 2,
+    "schema": "service_knowledge_v2",
+    "update_counter": 0,
+    "last_consolidated_at_count": 0,
+}
+
+
 def _load_knowledge(knowledge_path: str) -> Dict[str, Any]:
     """Load the service_knowledge.yaml file. Returns empty structure if not found."""
     if not os.path.isfile(knowledge_path):
         return {
-            "metadata": {"version": 2, "schema": "service_knowledge_v2"},
+            "metadata": dict(_METADATA_DEFAULTS),
             "services": {},
             "general_knowledge": [],
         }
@@ -142,10 +150,14 @@ def _load_knowledge(knowledge_path: str) -> Dict[str, Any]:
         data = yaml.safe_load(f)
     if data is None:
         return {
-            "metadata": {"version": 2, "schema": "service_knowledge_v2"},
+            "metadata": dict(_METADATA_DEFAULTS),
             "services": {},
             "general_knowledge": [],
         }
+    # Back-compat: fill in any metadata keys added after the initial schema.
+    md = data.setdefault("metadata", {})
+    for key, default in _METADATA_DEFAULTS.items():
+        md.setdefault(key, default)
     # YAML serialises an empty dict as `{}` but can round-trip as `[]` when
     # the file was written with default_flow_style or by hand. Normalise so
     # _record_knowledge never receives a list where it expects a dict.
@@ -320,6 +332,60 @@ class KnowledgeTools:
             {"services": subset, "general_knowledge": general},
             indent=2, default=str,
         )
+
+    # ------------------------------------------------------------------
+    # Consolidation helpers (not exposed as LLM tools)
+    # ------------------------------------------------------------------
+
+    def increment_learning_run_counter(self) -> int:
+        """Bump update_counter by one. Returns the new value. Thread-safe."""
+        with self._write_lock:
+            data = _load_knowledge(self._knowledge_path)
+            new_val = int(data["metadata"].get("update_counter", 0)) + 1
+            data["metadata"]["update_counter"] = new_val
+            _save_knowledge(self._knowledge_path, data)
+            return new_val
+
+    def get_metadata_counters(self) -> tuple:
+        """Return (update_counter, last_consolidated_at_count)."""
+        data = _load_knowledge(self._knowledge_path)
+        md = data.get("metadata", {})
+        return int(md.get("update_counter", 0)), int(md.get("last_consolidated_at_count", 0))
+
+    def load_full_knowledge_yaml(self) -> str:
+        """Return the entire KB file as a YAML string (for the consolidator prompt)."""
+        with open(self._knowledge_path, "r") as f:
+            return f.read()
+
+    def replace_knowledge(self, new_yaml_text: str, last_consolidated_at_count: int) -> None:
+        """
+        Atomically replace the KB with new_yaml_text after validation.
+        Backs up the previous file to <kb_dir>/old/ before overwriting.
+        Raises ValueError on parse failure or missing top-level keys.
+        """
+        import shutil
+        parsed = yaml.safe_load(new_yaml_text)
+        if not isinstance(parsed, dict) or "services" not in parsed or "metadata" not in parsed:
+            raise ValueError("Consolidator output missing required top-level keys (services, metadata)")
+        # Preserve the running counter and mark consolidation point
+        current_counter, _ = self.get_metadata_counters()
+        parsed["metadata"]["update_counter"] = current_counter
+        parsed["metadata"]["last_consolidated_at_count"] = last_consolidated_at_count
+        # Fill in any missing metadata defaults
+        for key, default in _METADATA_DEFAULTS.items():
+            parsed["metadata"].setdefault(key, default)
+
+        with self._write_lock:
+            backup_dir = os.path.join(self._kb_root, "old")
+            os.makedirs(backup_dir, exist_ok=True)
+            ts = datetime.now().strftime("%Y%m%d-%H%M%S")
+            backup_path = os.path.join(backup_dir, f"service_knowledge.pre_consolidation.{ts}.yaml")
+            if os.path.isfile(self._knowledge_path):
+                shutil.copy2(self._knowledge_path, backup_path)
+            _save_knowledge(self._knowledge_path, parsed)
+            self.service_node.get_logger().info(
+                f"KnowledgeTools: KB replaced by consolidator (backup: {backup_path})"
+            )
 
     # ------------------------------------------------------------------
     # Internal implementations

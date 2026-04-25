@@ -10,6 +10,7 @@ from .phase_controller import PhaseController
 from .interaction_logger import InteractionLogger
 from .execution_monitor import ExecutionMonitor
 from .learning_manager import LearningManager
+from .consolidation_manager import ConsolidationManager
 from .memory_persistence import MemoryPersistence
 
 
@@ -42,19 +43,22 @@ class Agent:
         self._tools_instance = tools_instance
 
         knowledge_tools = KnowledgeTools(service_node)
+        self._knowledge_tools = knowledge_tools
 
         # ── Model configs ──────────────────────────────────────────────────
         planner_config = LLMConfig("planner")
         executor_config = LLMConfig("executor")
         learner_config = LLMConfig("learner")
+        consolidator_config = LLMConfig("consolidator")
 
         self.model_name = planner_config.model
         self.model_provider = planner_config.model_provider
         self.model_configs = {
-            "planning":  {"name": planner_config.model, "provider": planner_config.model_provider},
-            "executing": {"name": executor_config.model, "provider": executor_config.model_provider},
-            "escalated": {"name": planner_config.model, "provider": planner_config.model_provider},
-            "learning":  {"name": learner_config.model, "provider": learner_config.model_provider},
+            "planning":      {"name": planner_config.model,      "provider": planner_config.model_provider},
+            "executing":     {"name": executor_config.model,     "provider": executor_config.model_provider},
+            "escalated":     {"name": planner_config.model,      "provider": planner_config.model_provider},
+            "learning":      {"name": learner_config.model,      "provider": learner_config.model_provider},
+            "consolidation": {"name": consolidator_config.model, "provider": consolidator_config.model_provider},
         }
 
         # ── Tool lists ─────────────────────────────────────────────────────
@@ -126,6 +130,7 @@ class Agent:
         planner_model = planner_config.llm.bind_tools(planner_tools, parallel_tool_calls=True)
         executor_model = executor_config.llm.bind_tools(executor_tools, parallel_tool_calls=True)
         learning_model = learner_config.llm.bind_tools(learning_tools, parallel_tool_calls=True)
+        consolidator_model = consolidator_config.llm  # no tools — outputs full YAML directly
 
         memory = MemorySaver()
         langgraph_config = {"configurable": {"thread_id": thread_id}, "recursion_limit": 200}
@@ -153,16 +158,23 @@ class Agent:
             system_prompt=learner_config.system_prompt,
             rsap_instance=rsap_instance,
         )
+        self._consolidation = ConsolidationManager(
+            consolidator_model=consolidator_model,
+            knowledge_tools=knowledge_tools,
+            service_node=service_node,
+            system_prompt=consolidator_config.system_prompt,
+        )
         self._persistence = MemoryPersistence(service_node)
 
         self.service_node = service_node
         self.stop_requested: bool = False
         self.record_knowledge: bool = False
+        self.consolidate_knowledge: bool = False
 
         service_node.get_logger().info(
             f"AgentOrchestrator initialized — "
             f"planner: {planner_config.model}, executor: {executor_config.model}, "
-            f"learner: {learner_config.model}"
+            f"learner: {learner_config.model}, consolidator: {consolidator_config.model}"
         )
 
     # ── Public API ───────────────────────────────────────────────────────────
@@ -184,6 +196,9 @@ class Agent:
           3. Decide: escalate / continue / done
           4. After loop: run learning nudge if any execution occurred
         """
+        if "consolidate knowledge" in user_message.lower():
+            return self._run_consolidation_on_demand()
+
         self._phase.set_from_message(user_message)
         if self._phase.current_phase == "executing":
             self._tools_instance.last_executed_user_index = 0
@@ -266,13 +281,36 @@ class Agent:
         return final_response
 
     def _run_learning_if_needed(self, session_had_execution: bool) -> None:
-        if session_had_execution and self.record_knowledge:
-            learner_model_name = self.model_configs.get("learning", {}).get("name", "unknown")
-            self._learning.run(
-                interaction_logger=self._logger,
-                executed_services=self._get_executed_services(),
-                learner_model_name=learner_model_name,
-            )
+        if not (session_had_execution and self.record_knowledge):
+            return
+        learner_model_name = self.model_configs.get("learning", {}).get("name", "unknown")
+        self._learning.run(
+            interaction_logger=self._logger,
+            executed_services=self._get_executed_services(),
+            learner_model_name=learner_model_name,
+        )
+        new_count = self._knowledge_tools.increment_learning_run_counter()
+        if self.consolidate_knowledge:
+            _, last_consolidated = self._knowledge_tools.get_metadata_counters()
+            if new_count - last_consolidated >= 3:
+                consolidator_model_name = self.model_configs.get("consolidation", {}).get("name", "unknown")
+                self._consolidation.run(
+                    interaction_logger=self._logger,
+                    current_counter=new_count,
+                    model_name=consolidator_model_name,
+                )
+
+    def _run_consolidation_on_demand(self) -> str:
+        """Handle explicit 'consolidate knowledge' user requests."""
+        consolidator_model_name = self.model_configs.get("consolidation", {}).get("name", "unknown")
+        current_counter, _ = self._knowledge_tools.get_metadata_counters()
+        self.service_node.get_logger().info("On-demand KB consolidation requested by user.")
+        self._consolidation.run(
+            interaction_logger=self._logger,
+            current_counter=current_counter,
+            model_name=consolidator_model_name,
+        )
+        return "Knowledge consolidation complete."
 
     def save_interaction_log(self, task_success=None, comment=None):
         self._persistence.save_session_log(
