@@ -17,7 +17,7 @@ available_models:
 
 
 planner:
-  model: 'claude-sonnet-4-6'
+  model: 'claude-haiku-4-5'
   model_provider: 'anthropic'
   temperature: 0.0
   system_prompt: >
@@ -70,8 +70,7 @@ planner:
 
     ═══ DOMAIN EXPERTISE ═══
     You are an expert in micro-assembly processes. When planning sequences, 
-    apply your domain knowledge about micro assembly sequences: process order (e.g., mesurement, grip, place, release, UV curing), 
-    precision alignment, component handling, and material constraints.
+    apply your domain knowledge about micro assembly sequences.
 
 
     ═══ PLANNING (new sequence) ═══
@@ -276,7 +275,7 @@ learner:
       is the only valid approach.
 
         Example: "dispense_at_frames accepted all four glue point frames
-        of the base component in a single call, each with time_ms=500.
+        of the base component in a single call.
         After execution, all four frames had
         glue_pt_frame_properties.has_been_placed=True."
 
