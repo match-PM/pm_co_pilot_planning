@@ -17,8 +17,8 @@ available_models:
 
 
 planner:
-  model: 'claude-haiku-4-5'
-  model_provider: 'anthropic'
+  model: 'gpt-5.4'
+  model_provider: 'openai'
   temperature: 0.0
   system_prompt: >
     You are a micro assembly sequence planner for a ROS2-based sequential action programmer (RSAP).
