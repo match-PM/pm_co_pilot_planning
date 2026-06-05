@@ -255,10 +255,17 @@ class Agent:
                 f"full_execution_requested={self._phase.full_execution_requested}, "
                 f"phase={self._phase.current_phase}"
             )
+            sequence_overview = ""
+            if self.rsap_instance:
+                try:
+                    sequence_overview = self._tools_instance._get_sequence_summary_structured()
+                except Exception:
+                    sequence_overview = ""
             decision = self._phase.decide_next(
                 response_text=result.response_text,
                 total_actions=total_actions,
                 last_executed_index=self._tools_instance.last_executed_user_index,
+                sequence_overview=sequence_overview,
             )
 
             if decision.kind == "escalate":

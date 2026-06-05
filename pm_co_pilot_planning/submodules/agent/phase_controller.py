@@ -63,10 +63,13 @@ class PhaseController:
         response_text: str,
         total_actions: int,
         last_executed_index: int = 0,
+        sequence_overview: str = "",
     ) -> NextAction:
         """
         Decide what to do after an interaction completes.
         last_executed_index: highest 1-based user index successfully executed this session.
+        sequence_overview: structured summary of the whole sequence (names + indices),
+            handed over on continuation so the agent sees what the full plan is about.
         Returns NextAction with kind "escalate", "continue", or "done".
         """
         # Escalation takes priority over continuation
@@ -85,9 +88,27 @@ class PhaseController:
         if self.current_phase == "executing" and self.full_execution_requested:
             next_idx = last_executed_index + 1
             if total_actions > 0 and next_idx <= total_actions:
+                # Carry the prior summary of key state changes forward. The
+                # executor windows its context, so the previous summary message
+                # would otherwise fall out of the window and the agent would
+                # continue without knowing what has already been assembled.
+                handover = ""
+                if sequence_overview and sequence_overview.strip():
+                    handover += (
+                        "Full sequence overview (what the whole plan is about — "
+                        "all actions, by 1-based index):\n"
+                        f"{sequence_overview.strip()}\n\n"
+                    )
+                if response_text and response_text.strip():
+                    handover += (
+                        "State so far — these actions already ran and their effects "
+                        "are now part of the scene; do NOT repeat them:\n"
+                        f"{response_text.strip()}\n\n"
+                    )
                 return NextAction(
                     kind="continue",
                     prompt=(
+                        f"{handover}"
                         f"Continue executing the sequence from action {next_idx}. "
                         f"There are {total_actions - next_idx + 1} actions remaining "
                         f"(actions {next_idx} to {total_actions})."

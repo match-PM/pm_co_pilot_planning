@@ -340,7 +340,7 @@ learner:
 
 
 executor:
-  model: 'gpt-5-mini'
+  model: 'gpt-5.2'
   model_provider: 'openai'
   temperature: 0.0
   system_prompt: >
