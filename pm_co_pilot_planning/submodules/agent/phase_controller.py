@@ -37,6 +37,11 @@ class PhaseController:
         self.consecutive_exec_failures = 0
         self.current_phase = "escalated"
 
+    def resume_execution(self):
+        """Hand control back to the executor after an escalation was resolved."""
+        self.consecutive_exec_failures = 0
+        self.current_phase = "executing"
+
     def reset_to_planning(self):
         self.current_phase = "planning"
         self.full_execution_requested = False
@@ -64,19 +69,30 @@ class PhaseController:
         total_actions: int,
         last_executed_index: int = 0,
         sequence_overview: str = "",
+        session_goal: str = "",
     ) -> NextAction:
         """
         Decide what to do after an interaction completes.
         last_executed_index: highest 1-based user index successfully executed this session.
         sequence_overview: structured summary of the whole sequence (names + indices),
             handed over on continuation so the agent sees what the full plan is about.
+        session_goal: one-sentence assembly objective, handed over on escalation and
+            continuation so the agent keeps the end goal in view and does not drop
+            steps the goal depends on.
         Returns NextAction with kind "escalate", "continue", or "done".
         """
+        goal_line = (
+            f"Assembly goal: {session_goal.strip()}\n\n"
+            if session_goal and session_goal.strip()
+            else ""
+        )
+
         # Escalation takes priority over continuation
         if self.should_escalate(response_text):
             return NextAction(
                 kind="escalate",
                 prompt=(
+                    f"{goal_line}"
                     "The execution monitor could not resolve this error and escalated to you.\n"
                     f"Recent response: {response_text}\n"
                     "Please diagnose the root cause using query_assembly_knowledge and fix the sequence. "
@@ -84,15 +100,15 @@ class PhaseController:
                 ),
             )
 
-        # Auto-continuation: executor stopped mid-sequence
-        if self.current_phase == "executing" and self.full_execution_requested:
+        # Auto-continuation: executor (or a resolved escalation) stopped mid-sequence
+        if self.current_phase in ("executing", "escalated") and self.full_execution_requested:
             next_idx = last_executed_index + 1
             if total_actions > 0 and next_idx <= total_actions:
                 # Carry the prior summary of key state changes forward. The
                 # executor windows its context, so the previous summary message
                 # would otherwise fall out of the window and the agent would
                 # continue without knowing what has already been assembled.
-                handover = ""
+                handover = goal_line
                 if sequence_overview and sequence_overview.strip():
                     handover += (
                         "Full sequence overview (what the whole plan is about — "

@@ -186,31 +186,37 @@ learner:
 
 
     You receive:
-      - PROPERTY CHANGES per service: concrete property changes observed in the
-        scene (e.g. four specific frames changing has_been_measured to True).
-      - EXECUTION TRACE: ordered list of successfully-completed actions with
-        their parameters and the property changes each caused.
-      - CONFIRMED FIXES: parameter changes that resolved a failure, together
-        with the error messages from the failed attempts they resolved.
+      - EXECUTION TRANSCRIPT: the raw, ordered record of every executor tool
+        call and its result — successes, failures (with their error messages),
+        retries, and escalations. Each result embeds its own success flag, error
+        message (on failure), and the concrete scene state_changes it caused.
+        Nothing has been filtered out; you must read it to find what happened.
       - EXISTING KB STATE: current usage_notes for the involved services,
         each with its id and note text, for classification and deduplication.
+
+    The transcript is your ground truth. To understand an outcome, read it in
+    order: an action may fail, then later succeed after other actions ran
+    (a re-run with no parameter change), or succeed after its parameters were
+    changed via set_action_parameters, or never succeed at all. Match a failed
+    action to its later retry by the action index (and name) in the results.
 
 
     STEP 0 — CLASSIFY EXISTING NOTES (do this FIRST, before recording anything new)
 
-    Walk through every note in EXISTING KB STATE. For each note decide:
+    Walk through every note in EXISTING KB STATE. For each note, judge it
+    against the evidence you read in the EXECUTION TRANSCRIPT and decide:
 
-      CONFIRMED — The evidence from this run is consistent with the note
+      CONFIRMED — The transcript is consistent with the note
         (same fix applied, same parameter rule followed, exact the same property changes observed).
         Call confirm_knowledge(service_name, note_id).
 
-      CONTRADICTED — The evidence from this run disproves the note
+      CONTRADICTED — The transcript disproves the note
         (the run succeeded without something the note says is required, or
         succeeded with a parameter value the note says is wrong).
         Call contradict_knowledge(service_name, note_id, evidence) with a
         one-sentence quote of the contradicting evidence.
 
-      SILENT — This run produced no evidence for or against the note.
+      SILENT — The transcript produced no evidence for or against the note.
         Do nothing for that note.
 
     Emit confirm/contradict calls in parallel where possible.
@@ -218,15 +224,15 @@ learner:
 
     STEP 1 — IDENTIFY NEW SERVICES
 
-    Check whether all services in the EXECUTION TRACE exist in the
-    EXISTING KB STATE. For any service that appears in the trace but
+    Check whether all services that executed in the EXECUTION TRANSCRIPT exist
+    in the EXISTING KB STATE. For any service that appears in the transcript but
     has no entry in the KB yet, you MUST record an initial usage_note
     that captures:
       - what the service did (based on its parameters and property changes)
       - how many elements it operated on (cardinality)
       - the key parameters and their values as used in this run
 
-    This applies to EVERY new service in the trace, including services
+    This applies to EVERY new service in the transcript, including services
     that completed successfully but produced no observable scene property
     changes (empty state_changes). A successful invocation is itself
     sufficient evidence to record a baseline note. For such no-op-on-scene
@@ -240,6 +246,23 @@ learner:
     service the system has encountered, even on first use.
 
     YOUR JOB:
+    Read the EXECUTION TRANSCRIPT end to end and extract the genuinely new
+    insights. Two kinds matter most:
+
+      - SUCCESSFUL BEHAVIOUR — what each service did, with what parameters,
+        on how many elements, and the resulting state_changes.
+
+      - FAILURES — every result with success=false. For each one, read the
+        error message AND the entries that follow to see how it was resolved:
+          * resolved after set_action_parameters then a successful retry of the
+            same index → a parameter rule (write it prescriptively, rule 1);
+          * resolved by running OTHER actions first, then retrying the SAME
+            action unchanged → a precondition / resource constraint: the error
+            names a state that had to change first (rule 4);
+          * never succeeded → a known failure mode worth recording with its
+            error message.
+        Do not skip a failure just because the overall run still succeeded.
+
     For each insight that is genuinely new (not already covered by an existing
     note in the KB), call record_knowledge once. Decide per entry:
 
@@ -259,14 +282,26 @@ learner:
 
     1. FORMULATION DEPENDS ON EVIDENCE TYPE.
 
-      For CONFIRMED FIXES (a parameter change that resolved an error):
-      Write prescriptively. State what must or must not be done, and
-      quote or paraphrase the error that occurs otherwise.
+      For PARAMETER FIXES (a failure resolved by set_action_parameters then a
+      successful retry of the same action): Write prescriptively. State what
+      must or must not be done, and quote or paraphrase the error otherwise.
 
         Example: "target_alignment_frame must be set to PM_Robot_Tool_TCP.
         Without this, iterative_align_gonio_left fails with 'Target frame
         not valid — target_alignment_frame has to be in chain of the
         gripper'."
+
+      For PRECONDITION / RESOURCE CONSTRAINTS (a failure resolved by running
+      other actions first, then retrying the SAME action unchanged, or a
+      failure that never resolved): Write the constraint prescriptively from
+      the error message, naming the state that had to change first and, when
+      the transcript shows it, the actions that satisfied it. See rule 4.
+
+        Example: "spawn_component_from_description cannot spawn a second
+        component onto an occupied chuck; it fails with 'Parent frame ... is
+        marked as occupied frame ... Only one object can be spawned at this
+        chuck'. The currently mounted component must be assembled and released
+        to free the chuck before the next component is spawned there."
 
       For PROPERTY-CHANGE OBSERVATIONS (successful execution without prior
       failure): Write as a grounded observation with structural context.
@@ -293,30 +328,40 @@ learner:
       is sufficient when the evidence shows multiple.
 
 
-    4. ORDERING OBSERVATIONS.
-      You may record ordering-related knowledge ONLY when a service FAILED
-      with an error message that names a missing precondition or required
-      prior state. Record this as a hard constraint with the error message
-      as evidence.
+    4. ORDERING AND RESOURCE CONSTRAINTS.
+      You may record ordering- or resource-related knowledge ONLY when a service
+      FAILED with an error message that names a missing precondition, required
+      prior state, or an occupied/contended resource. Record this as a hard
+      constraint with the error message as evidence.
 
-        Example: "force_grip_component requires the component to be spawned.
-        Without spawning, it fails with 'Component not found in scene'."
+        Example (precondition): "force_grip_component requires the component to
+        be spawned. Without spawning, it fails with 'Component not found in
+        scene'."
 
-      Do NOT infer ordering rules from execution sequence alone. "A ran
-      before B and B succeeded" does not mean A is required before B.
+        Example (resource/occupancy): "Only one component may occupy a chuck at
+        a time; spawning onto an occupied chuck fails with 'Parent frame ... is
+        marked as occupied frame'."
+
+      A failure that later succeeds on an UNCHANGED re-run (no
+      set_action_parameters), after other actions ran in between, is strong
+      evidence of such a precondition: the intervening actions changed the
+      state the error complained about. You may record this, grounded in the
+      error message, and name the enabling actions when the transcript shows them.
+
+      Do NOT infer ordering rules from success sequence alone. "A ran before B
+      and B succeeded" does not mean A is required before B — there must be a
+      failure message naming the precondition.
 
       Focus each usage_note on a SINGLE service: its parameters, its
       cardinality, its observed state changes, its error patterns.
-      Cross-service ordering relationships that are not grounded in a
-      failure are managed separately by the human operator.
 
 
     5. GROUND IN EVIDENCE.
-      Every entry must be traceable to a specific state change, error
-      message, confirmed fix, or a successful execution itself (when
-      the service does not modify scene properties). If you cannot
-      point to any of these, skip the entry. Do not speculate about
-      behavior the trace does not show.
+      Every entry must be traceable to something in the transcript: a specific
+      state change, an error message, a failure-then-resolution pattern, or a
+      successful execution itself (when the service does not modify scene
+      properties). If you cannot point to any of these, skip the entry. Do not
+      speculate about behavior the transcript does not show.
 
 
     6. DEDUPLICATE AGAINST EXISTING NOTES.
@@ -327,7 +372,8 @@ learner:
 
 
     CONFIDENCE VALUES:
-      - 0.7 for entries grounded in a confirmed fix + error message
+      - 0.7 for entries grounded in an error message (a parameter fix, or a
+        precondition/resource constraint with its failure message as evidence)
       - 0.6 for entries grounded in state changes or execution patterns
 
     SOURCE: Always use source="experience".
@@ -503,8 +549,9 @@ consolidator:
     - PRESERVE CARDINALITY. "all four laser measurement frames",
       not "a frame".
 
-    - For CONFIRMED FIXES (grounded in error messages): Keep
-      prescriptive ("must", "required"). These are hard constraints.
+    - For CONSTRAINT NOTES (grounded in error messages — parameter fixes,
+      preconditions, or resource/occupancy constraints): Keep prescriptive
+      ("must", "required"). These are hard constraints.
 
     - For STATE-CHANGE OBSERVATIONS: Write as grounded observations,
       not prescriptions. State what was done, with what parameters,

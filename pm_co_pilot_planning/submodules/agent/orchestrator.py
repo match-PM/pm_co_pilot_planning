@@ -1,4 +1,5 @@
 from rclpy.node import Node
+from langchain_core.messages import SystemMessage, HumanMessage
 from langgraph.checkpoint.memory import MemorySaver
 
 from pm_co_pilot_planning.submodules.langchain.tools.RsapTools import RsapTools
@@ -41,6 +42,7 @@ class Agent:
             self.rsap_instance = None
 
         self._tools_instance = tools_instance
+        self._assembly_knowledge = assembly_knowledge
 
         knowledge_tools = KnowledgeTools(service_node)
         self._knowledge_tools = knowledge_tools
@@ -131,6 +133,7 @@ class Agent:
         executor_model = executor_config.llm.bind_tools(executor_tools, parallel_tool_calls=True)
         learning_model = learner_config.llm.bind_tools(learning_tools, parallel_tool_calls=True)
         consolidator_model = consolidator_config.llm  # no tools — outputs full YAML directly
+        self._goal_llm = executor_config.llm  # plain, no-tools model for one-shot goal derivation
 
         memory = MemorySaver()
         langgraph_config = {"configurable": {"thread_id": thread_id}, "recursion_limit": 200}
@@ -170,6 +173,7 @@ class Agent:
         self.stop_requested: bool = False
         self.record_knowledge: bool = False
         self.consolidate_knowledge: bool = False
+        self._session_goal: str = ""
 
         service_node.get_logger().info(
             f"AgentOrchestrator initialized — "
@@ -202,6 +206,7 @@ class Agent:
         self._phase.set_from_message(user_message)
         if self._phase.current_phase == "executing":
             self._tools_instance.last_executed_user_index = 0
+            self._session_goal = self._derive_session_goal()
         session_had_execution = False
         pending = user_message
         final_response = ""
@@ -266,6 +271,7 @@ class Agent:
                 total_actions=total_actions,
                 last_executed_index=self._tools_instance.last_executed_user_index,
                 sequence_overview=sequence_overview,
+                session_goal=self._session_goal,
             )
 
             if decision.kind == "escalate":
@@ -275,6 +281,11 @@ class Agent:
                 self._phase.mark_escalated()
                 pending = decision.prompt
             elif decision.kind == "continue":
+                # A resolved escalation hands control back to the executor so the
+                # cheap executor model finishes the sequence (and the continuation
+                # is logged under the executing phase).
+                if self._phase.current_phase == "escalated":
+                    self._phase.resume_execution()
                 self.service_node.get_logger().info(
                     f"Auto-continuing execution: {decision.prompt[:60]}..."
                 )
@@ -285,6 +296,7 @@ class Agent:
 
         self._run_learning_if_needed(session_had_execution)
         self._phase.reset_to_planning()
+        self._session_goal = ""
         return final_response
 
     def _run_learning_if_needed(self, session_had_execution: bool) -> None:
@@ -330,6 +342,48 @@ class Agent:
         )
 
     # ── Internal helpers ──────────────────────────────────────────────────────
+
+    def _derive_session_goal(self) -> str:
+        """One-shot LLM pass that distills the loaded sequence into a one-sentence
+        assembly goal, handed over on escalation/continuation so the agent keeps the
+        end objective in view. Non-critical: returns "" on any failure."""
+        if not self.rsap_instance:
+            return ""
+        try:
+            sequence_overview = self._tools_instance._get_sequence_summary_structured()
+        except Exception:
+            return ""
+
+        scene_summary = ""
+        try:
+            scene_summary = self._assembly_knowledge.get_compact_scene_summary()
+        except Exception:
+            scene_summary = ""
+
+        try:
+            response = self._goal_llm.invoke([
+                SystemMessage(content=(
+                    "You summarize a micro-assembly action sequence into its overall goal. "
+                    "Reply with ONE sentence stating what the finished assembly is: name the "
+                    "components involved and their final relationships (what gets assembled "
+                    "onto what, how many of each). No preamble, no list — just the sentence."
+                )),
+                HumanMessage(content=(
+                    "ACTION SEQUENCE (ordered, by 1-based index):\n"
+                    f"{sequence_overview}\n\n"
+                    "CURRENT SCENE:\n"
+                    f"{scene_summary}"
+                )),
+            ])
+            goal = str(getattr(response, "content", "")).strip()
+        except Exception as e:
+            self.service_node.get_logger().warning(
+                f"Session goal derivation failed (non-critical): {e}"
+            )
+            return ""
+
+        self.service_node.get_logger().info(f"Derived session goal: {goal}")
+        return goal
 
     def _get_executed_services(self) -> list:
         """Return deduplicated service client names from the current action sequence."""
