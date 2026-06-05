@@ -15,6 +15,7 @@ Frame naming convention (enforced by assembly_manager when spawning):
 import json
 import os
 import re
+import time
 from typing import Optional, List, Dict, Any
 
 from langchain_core.tools import Tool, StructuredTool
@@ -314,15 +315,15 @@ class AssemblyKnowledgeTools:
 
     def _ensure_scene_updated(self, timeout_sec: float = 0.5) -> None:
         """
-        Spin the node once for a short duration to process pending subscription messages.
-        This ensures the scene callback has a chance to be called if a message is available.
+        Give the background executor a brief window to deliver a fresh scene message.
+
+        The node is already spun continuously by the background MultiThreadedExecutor, so
+        `_scene_callback` keeps `self._current_scene` up to date. We must NOT spin the node here:
+        spinning the same node from this (worker) thread while the executor also spins it races
+        inside the C-level message deserialization and causes a SIGSEGV. A short sleep is enough
+        to let a newly-published scene arrive.
         """
-        try:
-            rclpy.spin_once(self.service_node, timeout_sec=timeout_sec)
-        except Exception as e:
-            self.service_node.get_logger().warning(
-                f"AssemblyKnowledgeTools: could not spin node: {e}"
-            )
+        time.sleep(timeout_sec)
 
     # ------------------------------------------------------------------
     # Scene summary (used by pre_model_hook and state-diff)
