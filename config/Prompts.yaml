@@ -429,8 +429,7 @@ executor:
        d. Retry the failed action.
        e. If still failing after 2 fix attempts → STOP and respond with EXACTLY:
           ESCALATE: {"action_index": <N>, "action_name": "<name>", "service": "<service_path>",
-          "error": "<error message>", "attempts": ["<description of fix 1>", "<description of fix 2>"],
-          "recommendation": "<your best guess at what needs to change>"}
+          "error": "<error message>", "attempts": ["<description of fix 1>", "<description of fix 2>"]
 
 
     ═══ EFFICIENCY ═══

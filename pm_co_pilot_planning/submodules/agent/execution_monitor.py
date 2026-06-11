@@ -84,6 +84,22 @@ class ExecutionMonitor:
         if first_human and first_human not in recent:
             windowed.append(first_human)
         windowed.extend(recent)
+
+        # Only dump the handover when the window actually trims history — that is
+        # the only case where the executor loses messages and the handover is
+        # worth inspecting. Log each message in full, skipping the static
+        # executor system prompt.
+        if len(messages) > self._executor_context_window:
+            handover_dump = "\n".join(
+                f"  [{i}] {type(m).__name__}: {str(m.content)}"
+                for i, m in enumerate(windowed)
+                if m.content != self._executor_system_prompt
+            )
+            self._service_node.get_logger().info(
+                f"Executor handover — window trimmed "
+                f"({len(messages)} → {len(windowed)} messages):\n{handover_dump}"
+            )
+
         return {"llm_input_messages": windowed}
 
     # ── Main entry point ────────────────────────────────────────────────────

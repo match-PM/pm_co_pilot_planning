@@ -111,6 +111,7 @@ class Agent:
             tools_instance.get_available_services_tool,
             tools_instance.get_service_parameters_tool,
             tools_instance.add_service_to_sequence_tool,
+            tools_instance.delete_action_tool,
             knowledge_tools.query_assembly_knowledge_tool,
             knowledge_tools.record_knowledge_tool,
             assembly_knowledge.get_object_frames_tool,
@@ -274,6 +275,14 @@ class Agent:
                 session_goal=self._session_goal,
             )
 
+            # TEMP (verification): dump the full handover prompt on continue/
+            # escalate so the session-goal injection can be checked end-to-end.
+            # Remove once confirmed.
+            if decision.kind in ("continue", "escalate"):
+                self.service_node.get_logger().info(
+                    f"Handover prompt [{decision.kind}]:\n{decision.prompt}"
+                )
+
             if decision.kind == "escalate":
                 self.service_node.get_logger().info(
                     "Executor escalating to planner for complex error diagnosis"
@@ -286,9 +295,6 @@ class Agent:
                 # is logged under the executing phase).
                 if self._phase.current_phase == "escalated":
                     self._phase.resume_execution()
-                self.service_node.get_logger().info(
-                    f"Auto-continuing execution: {decision.prompt[:60]}..."
-                )
                 pending = decision.prompt  # phase stays "executing"
             else:
                 final_response = result.response_text
@@ -382,7 +388,7 @@ class Agent:
             )
             return ""
 
-        self.service_node.get_logger().info(f"Derived session goal: {goal}")
+        self.service_node.get_logger().error(f"Derived session goal: {goal}")
         return goal
 
     def _get_executed_services(self) -> list:
