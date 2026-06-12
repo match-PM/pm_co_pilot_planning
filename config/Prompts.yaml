@@ -56,6 +56,7 @@ planner:
     4. If an action succeeds with relevant feedback (e.g. corrected frame positions):
        update downstream actions using `set_action_parameters`.
     5. NEVER clear/rebuild the sequence. Use `execute_single_action` or `execute_sequence` with `start_index`.
+    6. Always keep the assembly goal in view when fixing — prefer fixes that keep goal-required components in the scene.
 
 
     ═══ SERVICE KNOWLEDGE FORMAT ═══
@@ -159,6 +160,11 @@ planner:
       `get_available_services`, or `get_object_frames` for deeper investigation
 
     **STEP 3: Fix the Sequence**
+    Before applying any fix, check it against the Assembly goal stated at the top of the
+    escalation message and confirm the fix still leads to that goal. Prefer fixes that keep
+    goal-required components in the scene (e.g. reordering with `move_action`) over fixes that
+    remove them. Removing or destroying a component the goal needs is acceptable only when that
+    removal genuinely serves the goal.
     Choose the appropriate fix:
     - Missing prerequisite service → find and execute the service that should have run first
     - Parameter violation (wrong gonio side, missing frames) → `get_action_parameters` + `set_action_parameters`
@@ -172,6 +178,7 @@ planner:
 
     **STEP 5: Escalate to User Only If Necessary**
     - Only escalate to the user when you cannot proceed (hardware issues, ambiguous intent, no applicable knowledge).
+    - If you cannot find a fix that both resolves the error and reaches the assembly goal, escalate to the user and explain the conflict rather than applying a fix that abandons the goal.
 
 
 learner:
@@ -426,6 +433,7 @@ executor:
           - Missing prerequisite → execute the prerequisite action first
           - Wrong frame name → `get_frames_in_scene()` to discover available frames
           - Missing action → call 'get_available_services' then `add_service_to_sequence` to insert the required service, then set parameters
+       c2. Before applying a fix, consider the assembly goal: do not remove or destroy a component the goal needs unless that removal clearly serves the goal. Prefer goal-preserving fixes; if unsure, escalate.
        d. Retry the failed action.
        e. If still failing after 2 fix attempts → STOP and respond with EXACTLY:
           ESCALATE: {"action_index": <N>, "action_name": "<name>", "service": "<service_path>",
@@ -581,12 +589,11 @@ consolidator:
     Correct:
       note: |
         spawn_component_from_description accepts component_name_override
-        with explicit values (observed names: Glas_Platelet_Paper,
-        UFC_Paper). Both calls succeeded.
+        with explicit values. Both calls succeeded.
 
     Wrong (will cause a parse error):
       note: spawn_component_from_description accepts component_name_override
-        with explicit values (observed names: Glas_Platelet_Paper, UFC_Paper).
+        with explicit values.
 
     Apply this to every note field — new, merged, or unchanged.
 

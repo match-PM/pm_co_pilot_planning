@@ -96,6 +96,9 @@ class PhaseController:
                     "The execution monitor could not resolve this error and escalated to you.\n"
                     f"Recent response: {response_text}\n"
                     "Please diagnose the root cause using query_assembly_knowledge and fix the sequence. "
+                    "When fixing, weigh your fix against the assembly goal above — avoid discarding a "
+                    "component the goal requires unless it genuinely serves the goal; prefer reordering "
+                    "over removing. "
                     "After fixing, continue execution from the failed action."
                 ),
             )
