@@ -239,6 +239,7 @@ class Agent:
                 ctx=ctx,
                 phase_controller=self._phase,
                 stop_predicate=lambda: self.stop_requested,
+                session_goal=self._session_goal,
             )
 
             # Handle mid-stream stop

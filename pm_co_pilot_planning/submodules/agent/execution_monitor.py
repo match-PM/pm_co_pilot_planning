@@ -47,6 +47,7 @@ class ExecutionMonitor:
         self._service_node = service_node
         # Set before each run_once call by the orchestrator
         self._current_phase: str = "planning"
+        self._session_goal: str = ""
 
     # ── LangGraph hooks ─────────────────────────────────────────────────────
 
@@ -54,6 +55,36 @@ class ExecutionMonitor:
         if self._current_phase == "executing":
             return self._executor_model
         return self._planner_model
+
+    # Fields kept when slimming a successful execute-action result for the LLM.
+    _SLIM_SUCCESS_KEYS = ("success", "index", "start_index", "final_index", "state_changes")
+
+    def _slim_tool_result(self, msg):
+        """Return a token-light copy of a SUCCESSFUL execute-action tool result
+        for the executor's view: keep success/index/state_changes, drop the
+        verbose service `message` payload. Failures and all other messages pass
+        through unchanged so the full error reaches the model.
+
+        Only the LLM-facing copy is slimmed — the original (stored) message is
+        never mutated, so the interaction log and learner transcript stay full.
+        """
+        if not isinstance(msg, ToolMessage):
+            return msg
+        if getattr(msg, "name", "") not in ("execute_single_action", "execute_sequence"):
+            return msg
+        try:
+            data = json.loads(msg.content)
+        except (json.JSONDecodeError, TypeError):
+            return msg
+        if not isinstance(data, dict) or not data.get("success"):
+            return msg  # keep full content for failures (and unparseable shapes)
+
+        slim = {k: data[k] for k in self._SLIM_SUCCESS_KEYS if k in data}
+        return ToolMessage(
+            content=json.dumps(slim),
+            tool_call_id=msg.tool_call_id,
+            name=getattr(msg, "name", None),
+        )
 
     def _pre_model_hook(self, state):
         """Inject system prompt + scene summary; window context for executor."""
@@ -81,9 +112,16 @@ class ExecutionMonitor:
             recent.pop(0)
 
         windowed = [SystemMessage(content=self._executor_system_prompt), scene_msg]
+        # Pin the session goal as a fresh SystemMessage every turn so it is always
+        # present regardless of windowing — it otherwise rides only inside a single
+        # un-pinned handover HumanMessage and scrolls out of the window mid-run.
+        if self._session_goal and self._session_goal.strip():
+            windowed.append(SystemMessage(
+                content=f"ASSEMBLY GOAL (keep in view): {self._session_goal.strip()}"
+            ))
         if first_human and first_human not in recent:
             windowed.append(first_human)
-        windowed.extend(recent)
+        windowed.extend(self._slim_tool_result(m) for m in recent)
 
         # Only dump the handover when the window actually trims history — that is
         # the only case where the executor loses messages and the handover is
@@ -111,12 +149,14 @@ class ExecutionMonitor:
         ctx: InteractionContext,
         phase_controller,
         stop_predicate: Callable[[], bool],
+        session_goal: str = "",
     ) -> ExecutionResult:
         """
         Stream one agent invocation. Writes all step data into ctx.
         Returns ExecutionResult with the final response text.
         """
         self._current_phase = phase
+        self._session_goal = session_goal
 
         agent_executor = create_react_agent(
             model=self._select_model,
