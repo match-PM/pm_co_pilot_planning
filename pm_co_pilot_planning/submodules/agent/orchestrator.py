@@ -10,6 +10,7 @@ from pm_co_pilot_planning.submodules.langchain.LLMConfig import LLMConfig
 from .phase_controller import PhaseController
 from .interaction_logger import InteractionLogger
 from .execution_monitor import ExecutionMonitor
+from .executor_gate import GatePauseCallback
 from .learning_manager import LearningManager
 from .consolidation_manager import ConsolidationManager
 from .memory_persistence import MemoryPersistence
@@ -131,11 +132,17 @@ class Agent:
             tools_instance.get_service_parameters_tool,
         ]
 
-        planner_model = planner_config.llm.bind_tools(planner_tools, parallel_tool_calls=True)
-        executor_model = executor_config.llm.bind_tools(executor_tools, parallel_tool_calls=True)
-        learning_model = learner_config.llm.bind_tools(learning_tools, parallel_tool_calls=True)
-        consolidator_model = consolidator_config.llm  # no tools — outputs full YAML directly
-        self._goal_llm = executor_config.llm  # plain, no-tools model for one-shot goal derivation
+        # Pause the ROS executor around every LLM (HTTP) call so message deserialization
+        # on the executor thread never overlaps the worker thread's GIL-releasing call.
+        # Bound at the model level so it fires for every call site (main stream, learning
+        # stream, consolidation invoke, goal-derivation invoke) without per-call wiring.
+        gate_cb = GatePauseCallback(service_node)
+
+        planner_model = planner_config.llm.bind_tools(planner_tools, parallel_tool_calls=True).with_config(callbacks=[gate_cb])
+        executor_model = executor_config.llm.bind_tools(executor_tools, parallel_tool_calls=True).with_config(callbacks=[gate_cb])
+        learning_model = learner_config.llm.bind_tools(learning_tools, parallel_tool_calls=True).with_config(callbacks=[gate_cb])
+        consolidator_model = consolidator_config.llm.with_config(callbacks=[gate_cb])  # no tools — outputs full YAML directly
+        self._goal_llm = executor_config.llm.with_config(callbacks=[gate_cb])  # plain, no-tools model for one-shot goal derivation
 
         memory = MemorySaver()
         langgraph_config = {"configurable": {"thread_id": thread_id}, "recursion_limit": 200}

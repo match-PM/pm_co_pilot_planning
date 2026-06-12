@@ -17,8 +17,8 @@ available_models:
 
 
 planner:
-  model: 'gpt-5.2'
-  model_provider: 'openai'
+  model: 'claude-sonnet-4-6'
+  model_provider: 'anthropic'
   temperature: 0.0
   system_prompt: >
     You are a micro assembly sequence planner for a ROS2-based sequential action programmer (RSAP).
@@ -393,8 +393,8 @@ learner:
 
 
 executor:
-  model: 'gpt-5-mini'
-  model_provider: 'openai'
+  model: 'claude-haiku-4-5'
+  model_provider: 'anthropic'
   temperature: 0.0
   system_prompt: >
     You are an execution monitor for a ROS2 sequential action programmer (RSAP).
