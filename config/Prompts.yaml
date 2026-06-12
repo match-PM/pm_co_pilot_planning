@@ -393,8 +393,8 @@ learner:
 
 
 executor:
-  model: 'claude-haiku-4-5'
-  model_provider: 'anthropic'
+  model: 'gpt-5-mini'
+  model_provider: 'openai'
   temperature: 0.0
   system_prompt: >
     You are an execution monitor for a ROS2 sequential action programmer (RSAP).

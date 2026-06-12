@@ -112,6 +112,7 @@ class Agent:
             tools_instance.get_service_parameters_tool,
             tools_instance.add_service_to_sequence_tool,
             tools_instance.delete_action_tool,
+            tools_instance.move_action_tool,
             knowledge_tools.query_assembly_knowledge_tool,
             knowledge_tools.record_knowledge_tool,
             assembly_knowledge.get_object_frames_tool,
