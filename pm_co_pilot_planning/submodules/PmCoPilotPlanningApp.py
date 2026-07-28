@@ -13,9 +13,10 @@ from openai import OpenAI
 
 from PyQt6.QtGui import QCursor, QIcon, QAction, QFont, QPalette, QColor, QTextCursor, QTextBlockFormat, QTextCharFormat, QFontMetrics
 from PyQt6.QtWidgets import QCheckBox, QComboBox, QSizePolicy, QLabel, QWidgetAction, QMenuBar, QDialog, QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QTextEdit, QPushButton, QStyleFactory
-from PyQt6.QtCore import Qt, QEvent, QObject, pyqtSignal, QThread, QSize, QRect, QPoint, pyqtSlot
+from PyQt6.QtCore import Qt, QEvent, QObject, pyqtSignal, QThread, QSize, QRect, QPoint, pyqtSlot, QTimer
 
 from pm_co_pilot_planning.submodules.agent import Agent
+from pm_co_pilot_planning.submodules.agent.executor_gate import ExecutorGate
 from ros_sequential_action_programmer.submodules.RosSequentialActionProgrammer import RosSequentialActionProgrammer
 
 class SpeechWorker(QObject):
@@ -32,11 +33,12 @@ class SpeechWorker(QObject):
         self.client.api_key = os.environ["OPENAI_API_KEY"]
 
     def run(self):
-        # Initialize the recognizer
-        r = sr.Recognizer()
-        with sr.Microphone() as source:
-            self.service_node.get_logger().info("Speech Recognition initialized!")
-            try:
+        transcript_text = ""
+        try:
+            # Initialize the recognizer
+            r = sr.Recognizer()
+            with sr.Microphone() as source:
+                self.service_node.get_logger().info("Speech Recognition initialized!")
                 audio = r.listen(source,timeout=2,phrase_time_limit=20)
                 
                 # Convert the audio data to an audio file format (e.g., WAV)
@@ -55,13 +57,13 @@ class SpeechWorker(QObject):
                 with open("output.mp3", "wb") as mp3_file:
                     mp3_file.write(mp3_audio.getvalue())
 
-                audio_file = open("output.mp3", "rb")
-
-                transcript = self.client.audio.transcriptions.create(
-                    model="whisper-1",
-                    file=audio_file,
-                    language="en"
-                )
+                with open("output.mp3", "rb") as audio_file:
+                    transcript = self.client.audio.transcriptions.create(
+                        model="whisper-1",
+                        file=audio_file,
+                        language="en"
+                    )
+                transcript_text = transcript.text
 
                 # Use pydub to play back the audio file
                 # sound = AudioSegment.from_file(audio_file, format="wav")
@@ -72,12 +74,15 @@ class SpeechWorker(QObject):
                 # text = r.recognize_whisper(audio)
                 # self.textReceived.emit(transcript.text)
 
-            except sr.UnknownValueError:
-                self.errorOccurred.emit("Speech Recognition could not understand audio")
-            except sr.RequestError as e:
-                self.errorOccurred.emit(f"Could not request results from Speech Recognition service; {e}")
-
-        self.finished.emit(transcript.text)
+        except sr.UnknownValueError:
+            self.errorOccurred.emit("Speech Recognition could not understand audio")
+        except sr.RequestError as e:
+            self.errorOccurred.emit(f"Could not request results from Speech Recognition service; {e}")
+        except Exception as e:
+            self.service_node.get_logger().error(f"Speech recognition failed: {e}")
+            self.errorOccurred.emit(f"Speech recognition failed: {e}")
+        finally:
+            self.finished.emit(transcript_text)
         
 class MessageWorker(QObject):
     finished = pyqtSignal(str)  # Signal to emit the response
@@ -93,13 +98,19 @@ class MessageWorker(QObject):
 
     def run(self):
         self.update_status.emit("Agent working...")
-
-        final_response = self.agent.handle_user_input(self.message)
-        self.service_node.get_logger().info(f"Final response: {final_response}")
-        self.update_status.emit("Ready for your input")
-        # Emit signal to refresh GUI after agent completes
-        self.sequence_modified.emit()
-        self.finished.emit(final_response)
+        try:
+            final_response = self.agent.handle_user_input(self.message)
+            self.service_node.get_logger().info(f"Final response: {final_response}")
+        except Exception as e:
+            self.service_node.get_logger().error(
+                f"Co-Pilot message processing failed: {e}"
+            )
+            final_response = f"Message processing failed: {e}"
+        finally:
+            self.update_status.emit("Ready for your input")
+            # Emit signal to refresh GUI after agent completes
+            self.sequence_modified.emit()
+            self.finished.emit(final_response)
 
 class ChatDisplay(QTextEdit):
     def __init__(self, parent=None):
@@ -207,8 +218,26 @@ class AdapterLoadWorker(QObject):
 class PmCoPilotPlanningApp(QMainWindow):
     sequence_modified = pyqtSignal()  # Signal to notify parent when sequence changes
     
-    def __init__(self, service_node:Node, rsap_instance: RosSequentialActionProgrammer = None):
-        super().__init__()
+    def __init__(
+        self,
+        service_node: Node,
+        rsap_instance: RosSequentialActionProgrammer = None,
+        parent: QWidget = None,
+    ):
+        super().__init__(parent)
+
+        self._message_thread = None
+        self._message_worker = None
+        self._speech_thread = None
+        self._speech_worker = None
+        self._close_requested = False
+        self._cleanup_complete = False
+
+        # This window is commonly embedded in RSAP, whose process already spins the
+        # shared node on a MultiThreadedExecutor.  Acquire the controlled executor
+        # before the agent creates its ObjectScene subscription or starts any tools.
+        self._executor_gate, _ = ExecutorGate.acquire(service_node)
+        self._executor_gate_released = False
 
         self.setupUI()
         self.apply_style()
@@ -235,8 +264,6 @@ class PmCoPilotPlanningApp(QMainWindow):
         )
 
         self.update_status_display("Assistant initialized and ready for your input!")
-
-
 
     def setupUI(self):
         # Apply a style suitable for dark mode
@@ -312,20 +339,20 @@ class PmCoPilotPlanningApp(QMainWindow):
         self.layout.addWidget(self.listen_button)
 
         # Add menu bar
-        menu_bar = self.menuBar()  # This will create a menu bar
+        self.menu_bar = self.menuBar()  # This will create a menu bar
 
         # Create an "Edit" menu
-        edit_menu = menu_bar.addMenu("Edit")
+        self.edit_menu = self.menu_bar.addMenu("Edit")
 
         # Add "New Thread" action
-        new_thread_action = QAction("New Thread", self)
-        new_thread_action.triggered.connect(self.start_new_conversation) 
-        edit_menu.addAction(new_thread_action)
+        self.new_thread_action = QAction("New Thread", self)
+        self.new_thread_action.triggered.connect(self.start_new_conversation)
+        self.edit_menu.addAction(self.new_thread_action)
 
         # Add "New Assistant" action
-        new_assistant_action = QAction("Update Assistant Files", self)
-        new_assistant_action.triggered.connect(self.update_assistant_files)  
-        edit_menu.addAction(new_assistant_action)
+        self.new_assistant_action = QAction("Update Assistant Files", self)
+        self.new_assistant_action.triggered.connect(self.update_assistant_files)
+        self.edit_menu.addAction(self.new_assistant_action)
 
         # Set the minimum size for the window
         self.setMinimumSize(QSize(800, 600))
@@ -389,26 +416,38 @@ class PmCoPilotPlanningApp(QMainWindow):
 
 
     def startSpeechRecognition(self):
+        if self._worker_is_active(self._speech_thread) or self._worker_is_active(
+            self._message_thread
+        ):
+            self.update_status_display("Please wait for the current operation to finish")
+            return
+
         self.service_node.get_logger().info(f"start speech recognition")
-        self.thread = QThread()
-        self.worker = SpeechWorker(self.service_node)
-        self.worker.moveToThread(self.thread)
+        speech_thread = QThread(self)
+        speech_worker = SpeechWorker(self.service_node)
+        self._speech_thread = speech_thread
+        self._speech_worker = speech_worker
+        speech_worker.moveToThread(speech_thread)
 
         # Connect signals
-        self.thread.started.connect(self.worker.run)
+        speech_thread.started.connect(speech_worker.run)
 
         # self.worker.textReceived.connect(self.handleSpeechInput)
-        self.worker.errorOccurred.connect(self.handleError)
-        self.worker.finished.connect(self.thread.quit)  # Ensure worker emits a finished signal when done
-        self.worker.finished.connect(self.worker.deleteLater)  # Cleanup worker after finishing
-        self.thread.finished.connect(self.thread.deleteLater)  # Cleanup thread after it finishes
-        self.thread.finished.connect(lambda: setattr(self, 'thread', None))
+        speech_worker.errorOccurred.connect(self.handleError)
+        speech_worker.finished.connect(speech_thread.quit)
+        speech_worker.finished.connect(speech_worker.deleteLater)
+        speech_thread.finished.connect(speech_thread.deleteLater)
+        speech_thread.finished.connect(self._on_speech_thread_finished)
 
-        self.worker.finished.connect(self.handleSpeechInput)
+        speech_worker.finished.connect(self.handleSpeechInput)
 
-        self.thread.start()
+        self._update_input_controls()
+        speech_thread.start()
 
     def handleSpeechInput(self, message):
+        if not message:
+            return
+
         # Process the recognized text as input
         self.service_node.get_logger().info(f"Recognized text: {message}")
         self.chat_history.append_question("User: ", message)
@@ -457,36 +496,91 @@ class PmCoPilotPlanningApp(QMainWindow):
         return super().eventFilter(obj, event)
 
     def on_send_clicked(self):
-        message = self.message_input.toPlainText()
+        message = self.message_input.toPlainText().strip()
+        if not message:
+            return
+        if self._worker_is_active(self._message_thread) or self._worker_is_active(
+            self._speech_thread
+        ):
+            self.update_status_display("Please wait for the current operation to finish")
+            return
+
         self.chat_history.append_question("User: ", message)
         self.start_message_processing_thread(message)
         self.message_input.clear()
 
     def start_message_processing_thread(self, message):
-        self.thread = QThread()
-        self.worker = MessageWorker(self.agent, message, self.service_node)
-        self.worker.moveToThread(self.thread)
+        if self._worker_is_active(self._message_thread):
+            self.update_status_display("Please wait for the current response")
+            return
+
+        message_thread = QThread(self)
+        message_worker = MessageWorker(self.agent, message, self.service_node)
+        self._message_thread = message_thread
+        self._message_worker = message_worker
+        message_worker.moveToThread(message_thread)
 
         # Connect signals and slots
-        self.thread.started.connect(self.worker.run)
-        self.worker.finished.connect(self.thread.quit)
-        self.worker.finished.connect(self.worker.deleteLater)
-        self.thread.finished.connect(self.thread.deleteLater)
-        self.thread.finished.connect(lambda: setattr(self, 'thread', None))
+        message_thread.started.connect(message_worker.run)
+        message_worker.finished.connect(message_thread.quit)
+        message_worker.finished.connect(message_worker.deleteLater)
+        message_thread.finished.connect(message_thread.deleteLater)
+        message_thread.finished.connect(self._on_message_thread_finished)
 
         # New signal to handle partial chunks
-        self.worker.chunk_received.connect(self.handle_partial_chunk)
+        message_worker.chunk_received.connect(self.handle_partial_chunk)
 
         # The final result once the worker is done
-        self.worker.finished.connect(self.handle_processed_message)
+        message_worker.finished.connect(self.handle_processed_message)
 
         # Optionally update the GUI with statuses
-        self.worker.update_status.connect(self.update_status_display)
+        message_worker.update_status.connect(self.update_status_display)
         
         # Connect sequence modified signal to parent
-        self.worker.sequence_modified.connect(self.on_sequence_modified)
+        message_worker.sequence_modified.connect(self.on_sequence_modified)
 
-        self.thread.start()
+        self._update_input_controls()
+        message_thread.start()
+
+    @staticmethod
+    def _worker_is_active(thread):
+        # References are cleared only by the QThread.finished handlers. Treat a
+        # newly created thread as busy even during the brief interval before run().
+        return thread is not None
+
+    def _update_input_controls(self):
+        busy = self._worker_is_active(
+            self._message_thread
+        ) or self._worker_is_active(self._speech_thread)
+        self.message_input.setEnabled(not busy)
+        self.send_button.setEnabled(not busy)
+        self.listen_button.setEnabled(not busy)
+
+    @pyqtSlot()
+    def _on_message_thread_finished(self):
+        thread = self.sender()
+        if self._message_thread is thread:
+            self._message_thread = None
+            self._message_worker = None
+        self._update_input_controls()
+        self._finish_deferred_close()
+
+    @pyqtSlot()
+    def _on_speech_thread_finished(self):
+        thread = self.sender()
+        if self._speech_thread is thread:
+            self._speech_thread = None
+            self._speech_worker = None
+        self._update_input_controls()
+        self._finish_deferred_close()
+
+    def _finish_deferred_close(self):
+        if (
+            self._close_requested
+            and not self._worker_is_active(self._message_thread)
+            and not self._worker_is_active(self._speech_thread)
+        ):
+            QTimer.singleShot(0, self.close)
 
     def handle_partial_chunk(self, chunk_text):
         """
@@ -509,13 +603,27 @@ class PmCoPilotPlanningApp(QMainWindow):
         if hasattr(self, 'agent'):
             self.agent.stop_requested = True
 
-        # Wait for the worker thread to finish before cleanup
-        if hasattr(self, 'thread') and self.thread is not None and self.thread.isRunning():
-            self.thread.quit()
-            self.thread.wait(5000)  # wait up to 5 s
+        # Never destroy the window, its menu bar, or its worker QThreads while
+        # worker signals and posted events may still target them.
+        if self._worker_is_active(
+            self._message_thread
+        ) or self._worker_is_active(self._speech_thread):
+            self._close_requested = True
+            self.update_status_display("Stopping current operation before closing...")
+            event.ignore()
+            return
 
-        self.cleanup()
-        event.accept()  # Proceed with the window closing
+        try:
+            if not self._cleanup_complete:
+                self._cleanup_complete = True
+                self.cleanup()
+        finally:
+            # Return the shared node to RSAP's executor only after the worker has
+            # stopped using it.
+            if not self._executor_gate_released:
+                self._executor_gate_released = True
+                self._executor_gate.release()
+        event.accept()
 
     def on_sequence_modified(self):
         """Emit signal to parent RSAP window to refresh the GUI"""
