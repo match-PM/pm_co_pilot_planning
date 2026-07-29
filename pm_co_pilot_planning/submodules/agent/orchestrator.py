@@ -209,7 +209,8 @@ class Agent:
           3. Decide: escalate / continue / done
           4. After loop: run learning nudge if any execution occurred
         """
-        if "consolidate knowledge" in user_message.lower():
+        message_lower = user_message.lower()
+        if "consolidat" in message_lower and "knowledge" in message_lower:
             return self._run_consolidation_on_demand()
 
         self._phase.set_from_message(user_message)
