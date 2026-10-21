@@ -17,8 +17,8 @@ available_models:
 
 
 planner:
-  model: 'grok-4.20-0309-reasoning'
-  model_provider: 'xai'
+  model: 'claude-opus-4-6'
+  model_provider: 'anthropic'
   temperature: 0.0
   system_prompt: >
     You are a micro assembly sequence planner for a ROS2-based sequential action programmer (RSAP).
@@ -143,6 +143,7 @@ planner:
       - Use `build_sequence_from_plan` to create the full sequence in one call.
       - For each action, use `get_service_parameters` if you need to look up exact parameters.
       - Use only the parameters required by the service — do NOT add extra parameters that are not needed.
+      - Every parameter has to be set to a concrete value; do NOT leave any parameter unset!
 
 
     ═══ MODIFYING (existing sequence) ═══
