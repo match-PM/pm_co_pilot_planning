@@ -1,6 +1,6 @@
 # PM Co-Pilot Planning
 
-An AI-powered co-pilot for micro-assembly sequence planning and execution in ROS2. It provides a conversational interface — voice or text — to build, modify, and run action sequences on robotic systems using LLM-based agents with persistent knowledge management.
+An AI-powered co-pilot for micro-assembly sequence planning and execution in ROS2. It provides a conversational interface via voice or text, to build, modify, and run action sequences on robotic systems using LLM-based agents with a learning mechanism and knowledge management.
 
 ---
 
@@ -57,7 +57,6 @@ Set the relevant keys in your environment before launching:
 ```bash
 export OPENAI_API_KEY="sk-..."          # required for speech I/O (Whisper + TTS)
 export ANTHROPIC_API_KEY="sk-ant-..."   # required if using Claude models (default)
-# export GOOGLE_API_KEY="..."           # optional, for Gemini models
 ```
 
 ---
@@ -113,12 +112,6 @@ consolidator:
 ```
 
 **Available models** (see `available_models` section in the file):
-
-| Provider | Models |
-|---|---|
-| Anthropic | `claude-haiku-4-5`, `claude-sonnet-4-6`, `claude-opus-4-6` |
-| OpenAI | `gpt-4o`, `gpt-4o-mini`, `gpt-4` |
-| Google | `gemini-2.0-flash-001`, `gemini-1.5-flash` |
 
 ### `config/assembly_config.yaml`
 
